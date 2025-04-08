@@ -1,0 +1,23 @@
+#ifndef LMX2820_H
+#define LMX2820_H
+
+
+#define PLL_CS         3   // Chip Select Pin for PLL
+#define SCLK_           12   // SPI Clock Pin
+#define MOSI_           11   // SPI MOSI Pin
+#define MISO_           13   // SPI MISO Pin
+ 
+bool Lmx2820SetFreqinMHz(double target_freq);
+void PLL_write(uint8_t address, uint16_t Data);
+uint16_t PLL_read(uint8_t address);
+void InitPLL();
+bool isPLL_Locked();
+void SetPLLToDefault();
+// VCO limitleri
+#define VCO_MIN 5650000000  // 5.65 GHz
+#define VCO_MAX 11300000000 // 11.3 GHz
+
+#define  MIN_FREQ 45000000
+#define  MAX_FREQ 22600000000
+
+#endif
