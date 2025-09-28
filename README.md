@@ -49,3 +49,7 @@ The generator offers outstanding spectral performance:
     <br>▶ Watch the Video
   </a>
 </p>
+
+
+## Live on Crowd Supply
+If you’d like to support the project, it’s now live on Crowd Supply: https://www.crowdsupply.com/atek-midas/dsg-22-6-ghz
