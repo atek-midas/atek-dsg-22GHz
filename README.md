@@ -1,1 +1,1 @@
-# atek_dsg_22GHz
+# atek_dsg_22.6GHz
