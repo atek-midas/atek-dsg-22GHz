@@ -1,5 +1,6 @@
 ![EditedForHackAday](https://github.com/user-attachments/assets/bad8766b-52ef-475a-b041-01a4b451d7ac)
 
+
 ## Overview
 
 The **DSG-22.6 GHz** is a high-performance, portable RF signal generator.  
@@ -37,3 +38,14 @@ The generator offers outstanding spectral performance:
 - **USB control** with SCPI-like command set  
 - **Wi-Fi web interface** for browser-based control in the field  
 - Capacitive touch display for direct device control 
+
+
+
+## Demonstration Video
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=TFMwc4Eo6wc" target="_blank" rel="noopener">
+    <img src="https://img.youtube.com/vi/TFMwc4Eo6wc/0.jpg" alt="Watch on YouTube" width="480">
+    <br>▶ Watch the Video
+  </a>
+</p>
