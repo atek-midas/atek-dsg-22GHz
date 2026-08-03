@@ -44,7 +44,7 @@ The generator offers outstanding spectral performance:
 ## Demonstration Video
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=TFMwc4Eo6wc" target="_blank" rel="noopener">
+  <a href="https://www.youtube.com/watch?v=-3eZY5avI0c" target="_blank" rel="noopener">
     <img src="https://img.youtube.com/vi/TFMwc4Eo6wc/0.jpg" alt="Watch on YouTube" width="480">
     <br>▶ Watch the Video
   </a>
@@ -53,3 +53,14 @@ The generator offers outstanding spectral performance:
 
 ## Live on Crowd Supply
 If you’d like to support the project, it’s now live on Crowd Supply: https://www.crowdsupply.com/atek-midas/dsg-22-6-ghz
+
+## License
+
+This project is licensed under the MIT License.
+
+You are free to use, modify, distribute, and use this project
+for personal or commercial purposes, subject to the terms of
+the MIT License.
+
+Third-party libraries and components used by this project may
+be distributed under their respective licenses.
