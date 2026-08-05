@@ -18,14 +18,27 @@ The generator offers outstanding spectral performance:
 
 | Parameter         | Value / Description |
 |-------------------|----------------------|
-| Frequency Range   | 0.3 GHz – 22.6 GHz |
+| Frequency Range   | 0.15 GHz – 22.6 GHz |
 | Frequency Resolution | 1 Hz |
-| Output Power      | +15 dBm to -50 dBm, 1 dB steps |
+| Output Power      | +20 dBm to -15 dBm, 1 dB steps |
+| Sweep Mode        | Linear and logarithmic frequency sweep with adjustable start/stop, step size, and dwell time |
 | Harmonic Suppression | ≤ 40 dBc (at 0 dBm output) |
 | Reference Input   | 10 MHz external, SMA |
-| Tuning Speed      | 100 µs |
-| Control Interfaces | USB Type-C & Wi-Fi |
+| Tuning Speed      | < 100 µs |
+| Control Interfaces | touchscreen,USB Type-C,Wi-Fi |
+|Built-in diagnostics | Temperature, voltage, current monitor and PLL lock status|
 | Power Supply      | USB Type-C, 5 V / 1.5 A |
+|Size                | 114 × 60 × 28.2 mm (5.67 × 2.36 × 1.11 in)|
+|Weight             | 250 g (8.8 oz)|
+|Open source         | Fully open hardware, firmware, and 3D models|
+
+## Output Power
+| Output Type | Freq Range | Output Power |
+| :--- | :--- | :--- |
+| **Filtered Output** | 2 - 18 GHz | 2 - 16 GHz Max 10 to 15 dBm |
+| | | 16 - 18 GHz Max 7 to 10 dBm |
+| **Unfiltered Output** | 0.15 - 22.6 GHz | 0.15 - 20 GHz Max 17 to 20 dBm |
+| | | 20 - 22.6 GHz Max 14 to 18 dBm |
 
 ## Hardware & Power Requirements
 
