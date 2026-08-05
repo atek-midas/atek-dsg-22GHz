@@ -63,7 +63,7 @@ void IO_EXP1_Init ();
 void IO_EXP1_DumpAllRegisters();
 void IO_EXP1_write (uint8_t address, uint8_t Data);
 void SetIOExpander();
-void SetFilterStat(bool OnOff);
+void SetFilterState(bool OnOff);
 void SetAttenuator(uint8_t value);
 void SetFilterBand(double Freq);
 void SetPLL1OnOff(bool enable);
@@ -71,7 +71,7 @@ void SetPLL1OnOff(bool enable);
 bool ReadLO1_LD();
 void SetLO1_SW1(uint8_t value);
 void SetRF_DSA1(uint8_t value);
+void SetRF_DSA2(uint8_t value);
 void SetPLL1_CE(bool state);
-void SetIF1_SW1_C(bool state);
-
+void SetRF_FLTRD_AMP_CTRL(uint8_t state);
 #endif

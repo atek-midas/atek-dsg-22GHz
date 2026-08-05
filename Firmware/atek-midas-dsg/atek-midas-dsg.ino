@@ -1,7 +1,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
-#include <ArduinoOTA.h>
+//#include <ArduinoOTA.h>
 #include "display.h"
 #include "main.h"
 #include "Lmx2820.h"
@@ -17,96 +17,154 @@ String currentAmplitude;
 String currentFreqUnit; 
 bool FilterStatus; 
 bool RFStatus;
-bool rfOutputEnabled = false; // RF çıkışının başlangıç durumu
+bool rfOutputEnabled = false; 
+
+// --- EXTERN VARIABLES FOR SWEEP ---
+extern String enteredFreqValue;
+extern String enteredUnitValue;
+extern String enteredAmpValue;
+extern String StartValueForSweepMenu;
+extern String StartUnitForSweepMenu;
+extern String StopValueForSweepMenu;
+extern String StopUnitForSweepMenu;
+extern String StepValueForSweepMenu;
+extern String StepUnitForSweepMenu;
+extern String DwellValueForSweepMenu;
+extern String AmpValueSweepForSweepMenu;
+extern String StepTypeValueForSweepMenu;
+extern bool isSweepRunning;
+extern MenuState currentMenu;
+extern double currentHz; 
+
+// Global variables to store real-time telemetry data
+float last_usb_voltage = 0.0;
+float last_dsg_current = 0.0;
+bool last_pll_lock = false;
+float temp = 0.0; 
 
 char* FloatToChar(float avg) {
-    // Yeterli boyutta bir char dizisi oluştur (örn: 20 karakter)
     static char buffer[20];
-    // Float değeri char dizisine dönüştür ve buffer'a yaz
-    snprintf(buffer, sizeof(buffer), "%.2f", avg);  // %.2f, virgülden sonra 2 basamak gösterir
+    snprintf(buffer, sizeof(buffer), "%.2f", avg); 
     return buffer;
 }
 
 char* DoubleToChar(double num) {
-    // Yeterli boyutta bir char dizisi oluştur (örn: 30 karakter)
     static char buffer[30];
-
-    // Double değeri char dizisine dönüştür ve buffer'a yaz
-    snprintf(buffer, sizeof(buffer), "%.4f", num);  // %.4f, virgülden sonra 4 basamak gösterir
-
+    snprintf(buffer, sizeof(buffer), "%.4f", num); 
     return buffer;
 }
 
 WebServer server(80);
-
 Preferences preferences;
 
-void readRFSettings() {  // Function to read from Preferences
+// --------------------------------------------------------------
+// Persistent calibration table storage
+// The calibration points are loaded from and saved to NVS memory.
+// --------------------------------------------------------------
+// ==============================================================
+//  Calibration Data Structure and NVS Functions
+// ==============================================================
+struct CalibData {
+    uint16_t freq_MHz;
+    int8_t att6_on;    
+    int8_t att3_on;
+    int8_t att_n3_on;
+    int8_t att6_off;
+    int8_t att3_off;
+    int8_t att_n3_off;
+};
+
+#define MAX_CALIB_POINTS 600
+CalibData calibTable[MAX_CALIB_POINTS];
+uint16_t calibCount = 0;
+
+void InitCalibrationData() {
+    preferences.begin("calib", false);
+    calibCount = preferences.getUShort("count", 0);
+    if (calibCount > 0 && calibCount <= MAX_CALIB_POINTS) {
+        size_t dataLen = calibCount * sizeof(CalibData);
+        size_t readLen = preferences.getBytes("data", calibTable, dataLen);
+        if (readLen != dataLen) {
+            calibCount = 0; // Read error
+        } else {
+            Serial.print("[NVS] Loaded calibration points: ");
+            Serial.println(calibCount);
+        }
+    }
+    preferences.end();
+}
+
+void SaveCalibrationToNVS() {
+    preferences.begin("calib", false);
+    preferences.putUShort("count", calibCount);
+    preferences.putBytes("data", calibTable, calibCount * sizeof(CalibData));
+    preferences.end();
+    Serial.println("[NVS] Kalibrasyon NVS'e kaydedildi.");
+}
+
+void ClearCalibrationRAM() {
+    calibCount = 0;
+    memset(calibTable, 0, sizeof(calibTable));
+}
+
+bool AddCalibrationPoint(uint16_t f, int8_t a1, int8_t a2, int8_t a3, int8_t a4, int8_t a5, int8_t a6) {
+    if (calibCount >= MAX_CALIB_POINTS) return false;
+    calibTable[calibCount].freq_MHz = f;
+    calibTable[calibCount].att6_on = a1;
+    calibTable[calibCount].att3_on = a2;
+    calibTable[calibCount].att_n3_on = a3;
+    calibTable[calibCount].att6_off = a4;
+    calibTable[calibCount].att3_off = a5;
+    calibTable[calibCount].att_n3_off = a6;
+    calibCount++;
+    return true;
+}
+// ==============================================================
+
+// --------------------------------------------------------------
+// Persistent RF settings
+// These functions read and write the last selected CW/RF parameters.
+// --------------------------------------------------------------
+void readRFSettings() { 
   preferences.begin("RFSettings", false);
+  currentFrequency = preferences.getString("frequency", "1000");
+  currentAmplitude = preferences.getString("amplitude", "10");   
+  currentFreqUnit = preferences.getString("freqUnit", "MHz");
+  FilterStatus = preferences.getBool("FilterStat", false);      
+  RFStatus  = preferences.getBool("RFStat", false);
   
-  currentFrequency = preferences.getString("frequency", "6000");      // Default 6 GHz
-  currentAmplitude = preferences.getString("amplitude", "-10.0");     // Default -10.0
-  currentFreqUnit = preferences.getString("freqUnit", "MHz");         // Default "MHz"
-  FilterStatus = preferences.getBool("FilterStat", false);            // Default OFF
-  RFStatus  = preferences.getBool("RFStat", false);                   // Default OFF
-  
-  // Seri porttan okunan değerleri yazdır
   Serial.println("=== RF Settings ===");
-  Serial.print("Frequency: ");
-  Serial.println(currentFrequency);
-  Serial.print("Amplitude: ");
-  Serial.println(currentAmplitude);
-  Serial.print("Frequency Unit: ");
-  Serial.println(currentFreqUnit);
-  Serial.print("Filter Status: ");
-  Serial.println(FilterStatus ? "ON" : "OFF");
-  Serial.print("RF Status: ");
-  Serial.println(RFStatus ? "ON" : "OFF");
+  Serial.print("Frequency: "); Serial.println(currentFrequency);
+  Serial.print("Amplitude: "); Serial.println(currentAmplitude);
+  Serial.print("Frequency Unit: "); Serial.println(currentFreqUnit);
+  Serial.print("Filter Status: "); Serial.println(FilterStatus ? "ON" : "OFF");
   Serial.println("====================");
-  
   preferences.end();
 }
 
-
-void saveRFSettings() { // Function to save to Preferences
+void saveRFSettings() { 
   preferences.begin("RFSettings", false);
   preferences.putString("frequency", currentFrequency);
   preferences.putString("amplitude", currentAmplitude);
   preferences.putString("freqUnit", currentFreqUnit);
   preferences.putBool("FilterStat", FilterStatus );
-  preferences.putBool("RFStat", false ); // Always off at power on
+  preferences.putBool("RFStat", false ); 
   preferences.end();
 }
 
 void toggleRFOutput() {
-
-
-  rfOutputEnabled = !rfOutputEnabled; // Durumu tersine çevir
-  if (rfOutputEnabled) {
-    // RF çıkışını aç
-    activateRFOutput(); // RF çıkışını açmak için kendi fonksiyonunuzu buraya ekleyin
-  } else {
-    // RF çıkışını kapat
-    deactivateRFOutput(); // RF çıkışını kapatmak için kendi fonksiyonunuzu buraya ekleyin
-  }
-}
-
-void activateRFOutput() {
-  Serial.println("Activating RF Output");
-  // Your code to turn the RF output ON (e.g., set a pin HIGH)
-}
-
-void deactivateRFOutput() {
-  Serial.println("Deactivating RF Output");
-  // Your code to turn the RF output OFF (e.g., set a pin LOW)
+  rfOutputEnabled = !rfOutputEnabled; 
+  SetRfOnOff(rfOutputEnabled); 
 }
 
 void handleToggleRFOutput() {
   toggleRFOutput();
-  server.send(200, "text/plain", String(rfOutputEnabled)); // Yeni durumu gönder
+  server.send(200, "text/plain", rfOutputEnabled ? "1" : "0"); 
 }
 
-
+// --------------------------------------------------------------
+// Wi-Fi configuration storage and connection handling
+// --------------------------------------------------------------
 String wifiSSID;
 String wifiPassword;
 
@@ -115,12 +173,9 @@ void readWiFiCredentials() {
   wifiSSID = preferences.getString("ssid", "");
   wifiPassword = preferences.getString("password", "");
   preferences.end();
-  Serial.print("Read SSID: "); Serial.println(wifiSSID); // Debug print
-  Serial.print("Read Password: "); Serial.println(wifiPassword); // Debug print
 }
-
  
-    char statusMessage[50];  
+char statusMessage[50];  
 
 bool connectToWiFi(int tryCount) {
   if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
@@ -130,7 +185,7 @@ bool connectToWiFi(int tryCount) {
       ConnectionStatus(" Try ",false);
       String str = String(i);  
       ConnectionStatus(str.c_str(), false);
-      WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str()); // Sadece bir kez çağırın
+      WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str()); 
       int connectionTryCount = 0;
       while (WiFi.status() != WL_CONNECTED && connectionTryCount < 10) { 
         delay(1500);
@@ -140,12 +195,10 @@ bool connectToWiFi(int tryCount) {
       Serial.println();
 
       if (WiFi.status() == WL_CONNECTED) {
-        ConnectionStatus("Wi-Fi'ye bağlandı!",true);
+        ConnectionStatus("Connected to Wi-Fi!",true);
         return true;
       } else {
         ConnectionStatus("Wi-Fi Connection Failed!",true);
-        Serial.print("Hata kodu: ");
-        Serial.println(WiFi.status()); // Hata kodunu yazdırın
         if (i < tryCount) {
           delay(5000);
         }
@@ -157,31 +210,21 @@ bool connectToWiFi(int tryCount) {
   return false;
 }
 
-
-
 void handleSave() {
   wifiSSID = server.arg("ssid");
   wifiPassword = server.arg("password");
-
   if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
-    Serial.print("Saving SSID: ");
-    Serial.println(wifiSSID);  // Debug print
-    Serial.print("Saving Password: ");
-    Serial.println(wifiPassword);  // Debug print
     preferences.begin("WifiSettings", false);
     preferences.putString("ssid", wifiSSID);
     preferences.putString("password", wifiPassword);
     preferences.end();
 
-    Serial.println("Credentials saved. Restarting...");  // Debug print
-    server.sendHeader("Location", "/"); // Redirect to root
-    server.send(302, "text/html", "Credentials saved. Redirecting..."); // User-friendly message
+    server.sendHeader("Location", "/");
+    server.send(302, "text/html; charset=utf-8", "Credentials saved. Redirecting..."); 
     delay(1000);
     ESP.restart();
-
   } else {
-    Serial.println("SSID and password cannot be empty!");  // Debug print
-    server.send(200, "text/plain", "SSID ve parola boş olamaz!");
+    server.send(200, "text/plain; charset=utf-8", "SSID and password cannot be empty!");
   }
 }
 
@@ -197,35 +240,28 @@ WiFiState wifiState = WIFI_INIT;
 unsigned long wifiStartTime = 0;
 int wifiRetryCount = 0;
 
-
+// --------------------------------------------------------------
+// Main hardware initialization
+// Initializes serial control, display, touch input, fan, ADC, IO expander, and PLL.
+// --------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
+  // Load the calibration table from non-volatile storage (NVS) during startup
+  InitCalibrationData();
   Serial.println("Starting...");
 
   RC_Begin();
   RC_SetWrite([](const char* s){ Serial.print(s); });  
 
   SetupDisplay();
- 
   initTouch();
-
-/*
-  // Wi-Fi Threat
-  xTaskCreatePinnedToCore(
-    WiFiTask,      // Task fonksiyonu
-    "WiFiTask",    // Task ismi
-    8192,          // Stack boyutu (ESP32 için önerilen minimum 8KB)
-    NULL,          // Parametre (şu an kullanılmıyor)
-    1,             // Öncelik (1 düşük, 5 yüksek)
-    NULL,          // Task handle (şu an kullanılmıyor)
-    1              // Core ID (0 veya 1 seçilebilir, genelde 1 kullanılır)
-  );
-*/
-
+  Fan_Init();
 
   readRFSettings(); 
 
   drawMainMenu();
+  SetRfOnOff(false);
+   
   SetTemp("24");
   SetUSBVoltge("5.1");
 
@@ -241,10 +277,9 @@ void setup() {
 
   pinMode(PLL_CS, OUTPUT);
   digitalWrite(PLL_CS, HIGH); 
-
   
   InitADC();
-	Serial.print("\r\n");
+  Serial.print("\r\n");
   InitADC();
 
   IO_EXP1_Init();
@@ -252,24 +287,26 @@ void setup() {
   ConnectionStatus("Wait...", true);  delay(1000);
 
   InitPLL();
-  
+  bool Filtered = true;
+  SetFilter(Filtered);
+  Lmx2820SetFreqinMHz(6000, 10000000, Filtered);
 }
 
- 
-
+// --------------------------------------------------------------
+// Legacy Wi-Fi task entry point
+// Currently returns immediately, so the active Wi-Fi flow is handled elsewhere.
+// --------------------------------------------------------------
 void WiFiTask(void *parameter) {
   return;
   bool isHotSpot = false;
-  readRFSettings(); // Read RF settings from Preferences
+  readRFSettings();
   readWiFiCredentials();
   SetWifiStatus(WIFI_STATUS_OFF);
-  if (connectToWiFi(3)) {  // 3 deneme ile bağlanmayı dene
+  if (connectToWiFi(3)) { 
     ConnectionStatus("IP address: ", true);
     String ipStr = WiFi.localIP().toString();
     ConnectionStatus(ipStr.c_str(), false);
   } else {
-
-
     SetWifiStatus(WIFI_STATUS_HOTSPOT);
     ConnectionStatus("Creating Hotspot.", true);
     IPAddress local_IP(192, 168, 4, 1);
@@ -277,32 +314,29 @@ void WiFiTask(void *parameter) {
     IPAddress subnet(255, 255, 255, 0);
     WiFi.softAPConfig(local_IP, gateway, subnet);
     WiFi.softAP(apSSID, apPassword);
-  
     String dots = "";
-    // Wait until IP assigned
     int retries = 0;
     while (WiFi.softAPIP().toString() != "192.168.4.1" && retries++ < 50) {
-        delay(500);  // 200ms bekle
+        delay(500);
         dots += "*";
         ConnectionStatus(dots.c_str(), true);
     }
-
     ConnectionStatus("Hotspot IP:", true);
     String ipStr = WiFi.softAPIP().toString();
     ConnectionStatus(ipStr.c_str(), false);
     isHotSpot = true;
   }
 
-  server.on("/", handleRoot); // Use handleRoot to send the HTML
+  server.on("/", handleRoot);
   server.on("/save", handleSave);
-  server.on("/setFrequency", handleSetFrequency); 
-  server.on("/setAmplitude", handleSetAmplitude); 
+  server.on("/applyCW", handleApplyCW); 
+  server.on("/applySweep", handleApplySweep); 
   server.on("/toggleRFOutput", handleToggleRFOutput);
-
-  server.on("/setLO1SW1", handleSetLO1SW1);
-  server.on("/setRFDSA1", handleSetRFDSA1);
-  server.on("/setPLL1CE", handleSetPLL1CE);
-  server.on("/setIF1SW1C", handleSetIF1SW1C);
+  server.on("/toggleSweep", handleToggleSweep);
+  server.on("/telemetry", handleTelemetry); 
+  server.on("/toggleSweep", handleToggleSweep);
+  server.on("/telemetry", handleTelemetry); 
+  server.on("/getSettings", handleGetSettings); // <--- New route added
 
   server.begin();
   ConnectionStatus("Web Server Ready.", true);
@@ -314,252 +348,475 @@ void WiFiTask(void *parameter) {
   {
     SetWifiStatus(WIFI_STATUS_ON);
   }
-  OTABegin();
 
-  vTaskDelete(NULL); // Task tamamlandığında kendini sonlandır
+  vTaskDelete(NULL);
 }
 
 void InitServer()
 {
-  server.on("/", handleRoot); // Use handleRoot to send the HTML
+  server.on("/", handleRoot); 
   server.on("/save", handleSave);
-  server.on("/setFrequency", handleSetFrequency); 
-  server.on("/setAmplitude", handleSetAmplitude); 
+  server.on("/applyCW", handleApplyCW);
+  server.on("/applySweep", handleApplySweep); 
   server.on("/toggleRFOutput", handleToggleRFOutput);
-  
-server.on("/setLO1SW1", handleSetLO1SW1);
-server.on("/setRFDSA1", handleSetRFDSA1);
-server.on("/setPLL1CE", handleSetPLL1CE);
-server.on("/setIF1SW1C", handleSetIF1SW1C);
+  server.on("/toggleSweep", handleToggleSweep);
+  server.on("/telemetry", handleTelemetry); 
+
   server.begin();
-
-  OTABegin();
-
-}
-void OTABegin() {
-  ArduinoOTA
-    .onStart([]() {
-      String type;
-      if (ArduinoOTA.getCommand() == U_FLASH)
-        type = "sketch";
-      else  // U_SPIFFS
-        type = "filesystem";
-
-      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-      Serial.println("Start updating " + type);
-    })
-    .onEnd([]() {
-      Serial.println("\nEnd");
-    })
-    .onProgress([](unsigned int progress, unsigned int total) {
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    })
-    .onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-      else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
-
-  ArduinoOTA.begin();
 }
 
+// --------------------------------------------------------------
+// Web interface generator
+// Builds the browser-based control panel for CW, sweep, telemetry, and Wi-Fi settings.
+// --------------------------------------------------------------
 String getHTML() {
+  // --- Added section: expose live variables to the HTML interface ---
+  extern String FreqValueForMainMenu;
+  extern String FreqUnitForMainMenu;
+  extern String AmpValueForMainMenu;
+
+  String btnRfColor = rfOutputEnabled ? "#a6e3a1" : "#f38ba8";
+  String btnRfText  = rfOutputEnabled ? "RF OUTPUT: ON" : "RF OUTPUT: OFF";
+  
+  String btnSweepColor = isSweepRunning ? "#f38ba8" : "#a6e3a1";
+  
+  // Fix: character encoding issues were resolved.
+  String btnSweepText  = isSweepRunning ? "&#9209; STOP SWEEP" : "&#9654; START SWEEP";
+  
   String html = R"=====( 
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ATEK 22 GHz RF Signal Generator</title>
+  <title>DSG 22.6 GHz - Web Control Center</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Arial, sans-serif;
       text-align: center;
-      background-color: #f4f4f4;
+      background-color: #1e1e2e;
+      color: #cdd6f4;
+      margin: 0;
+      padding: 10px;
     }
     .container {
       max-width: 600px;
       margin: 0 auto;
       padding: 20px;
-      background-color: white;
+      background-color: #313244;
       border-radius: 10px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+      border: 1px solid #45475a;
     }
-    .wide-button {
-      padding: 10px 20px;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      margin-top: 10px;
-      width: 80%;
-      box-sizing: border-box;
-    }
-    input[type=text], select, input[type=number], input[type=password] {
-      width: 80%;
-      padding: 10px;
-      margin: 10px 0;
-      box-sizing: border-box;
-    }
+    h1, h2 { color: #89b4fa; margin-top:0; }
+    hr { border: 0; height: 1px; background: #45475a; margin: 25px 0; }
+    
     label {
       display: block;
+      text-align: left;
+      font-weight: bold;
       margin-bottom: 5px;
+      color: #cdd6f4;
+      font-size: 14px;
     }
-    hr {
-      margin: 20px 0;
+    
+    input[type=number], input[type=text], input[type=password], select {
+      background-color: #11111b;
+      color: white;
+      border: 1px solid #45475a;
+      padding: 10px;
+      border-radius: 5px;
+      box-sizing: border-box;
+      font-size: 15px;
     }
-    .wifi-credentials {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    
+    button {
+      background-color: #45475a;
+      color: #cdd6f4;
+      border: 1px solid #45475a;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.2s;
     }
-    .wifi-credentials > * {
+    button:hover { border-color: #89b4fa; }
+    
+    .spinbox-container {
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      gap: 5px;
       margin-bottom: 10px;
-      width: 80%;
+    }
+    
+    .preset-btn {
+      flex: 1;
+      padding: 5px;
+      font-size: 12px;
+      font-weight: normal;
+    }
+
+    .btn-step {
+      width: 45px;
+      padding: 10px;
+      font-size: 18px;
+    }
+
+    .wide-button {
+      width: 100%;
+      padding: 15px;
+      font-size: 16px;
+      margin-top: 10px;
+      color: #11111b;
+    }
+    .panel {
+      background-color: #1e1e2e;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border: 1px solid #45475a;
+    }
+    .live-item {
+      background-color: #11111b;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #f9e2af;
+      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>ATEK 22 GHz RF Signal Generator</h1>
+    
+    <div class="panel">
+        <h2>&#128225; CW (Continuous Wave)</h2>
+        <label>CW Frequency:</label>
+        <div class="spinbox-container">
+            <button id="btn_minus" class="btn-step">-</button>
+            <input type="number" step="0.001" id="frequency" value=")=====" + FreqValueForMainMenu + R"=====(" style="width:45%;">
+            <select id="freqUnit" style="width:30%;">
+              <option value="KHz" )=====" + String(FreqUnitForMainMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
+              <option value="MHz" )=====" + String(FreqUnitForMainMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
+              <option value="GHz" )=====" + String(FreqUnitForMainMenu == "GHz" ? "selected" : "") + R"=====(>GHz</option>
+            </select>
+            <button id="btn_plus" class="btn-step">+</button>
+        </div>
 
-    <hr>
-    <h2>RF Control</h2>
-    <label for="frequency">Frequency:</label>
-    <input type="text" id="frequency" name="frequency" value=")=====" + String(currentFrequency) + R"=====(">
-    <select id="freqUnit">
-      <option value="KHz" )=====" + String(currentFreqUnit == "KHz" ? "selected" : "") + R"=====(>KHz</option>
-      <option value="MHz" )=====" + String(currentFreqUnit == "MHz" ? "selected" : "") + R"=====(>MHz</option>
-      <option value="GHz" )=====" + String(currentFreqUnit == "GHz" ? "selected" : "") + R"=====(>GHz</option>
-    </select>
-    <button class="wide-button" id="setFrequency">Set Frequency</button>
+        <label>Increment Step:</label>
+        <div class="spinbox-container" style="margin-bottom: 20px;">
+            <input type="number" step="0.001" id="step_val" value="100.0" style="width:65%;">
+            <select id="stepUnit" style="width:30%;">
+              <option value="KHz">KHz</option>
+              <option value="MHz" selected>MHz</option>
+              <option value="GHz">GHz</option>
+            </select>
+        </div>
 
-    <label for="amplitude">Amplitude (dBm):</label>
-    <input type="text" id="amplitude" name="amplitude" value=")=====" + String(currentAmplitude) + R"=====(">
-    <button class="wide-button" id="setAmplitude">Set Amplitude</button>
+        <label>Target Power (dBm):</label>
+        <input type="number" id="amplitude" min="-20" max="20" step="0.1" value=")=====" + AmpValueForMainMenu + R"=====(" style="width:100%; margin-bottom:15px;">
 
-    <hr>
-    <h2>IO Expander Control</h2>
+        <label>Filter:</label>
+        <select id="filterSelect" style="width:100%; margin-bottom:15px;">
+            <option value="0" )=====" + String(!FilterStatus ? "selected" : "") + R"=====(>Filter: OFF (0.15-22.6 GHz)</option>
+            <option value="1" )=====" + String(FilterStatus ? "selected" : "") + R"=====(>Filter: ON (2-18 GHz)</option>
+        </select>
 
-    <label for="lo1sw1">LO1_SW1 (0–7):</label>
-    <input type="number" id="lo1sw1" min="0" max="7">
-    <button class="wide-button" onclick="setLO1SW1()">Set LO1_SW1</button>
+        <button class="wide-button" id="applyCW" style="background-color:#89b4fa;">APPLY CW SETTINGS</button>
+        <button class="wide-button" id="btn_rf" style="background-color:)=====" + btnRfColor + R"=====(">)=====" + btnRfText + R"=====(</button>
+    </div>
 
-    <label for="rfds">RF_DSA1 (0–31):</label>
-    <input type="number" id="rfds" min="0" max="31">
-    <button class="wide-button" onclick="setRFDSA1()">Set RF_DSA1</button>
+    <div class="panel">
+        <h2>&#128200; Sweep Settings</h2>
+        
+        <label>Start Frequency:</label>
+        <div class="spinbox-container">
+            <input type="number" step="0.001" id="sw_start" value=")=====" + StartValueForSweepMenu + R"=====(" style="width:65%;">
+            <select id="sw_start_unit" style="width:30%;">
+                <option value="KHz" )=====" + String(StartUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
+                <option value="MHz" )=====" + String(StartUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
+                <option value="GHz" )=====" + String(StartUnitForSweepMenu == "GHz" ? "selected" : "") + R"=====(>GHz</option>
+            </select>
+        </div>
+        <div class="spinbox-container" style="margin-bottom: 15px;">
+           <button class="preset-btn" onclick="setPreset('sw_start', 150, 'MHz')">150 MHz</button>
+           <button class="preset-btn" onclick="setPreset('sw_start', 1, 'GHz')">1 GHz</button>
+           <button class="preset-btn" onclick="setPreset('sw_start', 5, 'GHz')">5 GHz</button>
+        </div>
 
-    <label>PLL1_CE:</label>
-    <button class="wide-button" onclick="setPLL1CE(true)">ON</button>
-    <button class="wide-button" onclick="setPLL1CE(false)">OFF</button>
+        <label>Stop Frequency:</label>
+        <div class="spinbox-container">
+            <input type="number" step="0.001" id="sw_stop" value=")=====" + StopValueForSweepMenu + R"=====(" style="width:65%;">
+            <select id="sw_stop_unit" style="width:30%;">
+                <option value="KHz" )=====" + String(StopUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
+                <option value="MHz" )=====" + String(StopUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
+                <option value="GHz" )=====" + String(StopUnitForSweepMenu == "GHz" ? "selected" : "") + R"=====(>GHz</option>
+            </select>
+        </div>
+        <div class="spinbox-container" style="margin-bottom: 15px;">
+           <button class="preset-btn" onclick="setPreset('sw_stop', 5, 'GHz')">5 GHz</button>
+           <button class="preset-btn" onclick="setPreset('sw_stop', 10, 'GHz')">10 GHz</button>
+           <button class="preset-btn" onclick="setPreset('sw_stop', 22.6, 'GHz')">22.6 GHz</button>
+        </div>
 
-    <label>IF1_SW1_C:</label>
-    <button class="wide-button" onclick="setIF1SW1C(true)">ON</button>
-    <button class="wide-button" onclick="setIF1SW1C(false)">OFF</button>
+        <label>Step:</label>
+        <div class="spinbox-container" style="margin-bottom: 15px;">
+            <input type="number" step="0.001" id="sw_step" value=")=====" + StepValueForSweepMenu + R"=====(" style="width:65%;">
+            <select id="sw_step_unit" style="width:30%;">
+                <option value="KHz" )=====" + String(StepUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
+                <option value="MHz" )=====" + String(StepUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
+                <option value="GHz" )=====" + String(StepUnitForSweepMenu == "GHz" ? "selected" : "") + R"=====(>GHz</option>
+            </select>
+        </div>
 
-    <hr>
-    <div class="wifi-credentials">
+        <div style="display:flex; gap:10px; margin-bottom: 15px;">
+            <div style="flex:1;">
+                <label>Dwell (ms):</label>
+                <input type="number" id="sw_dwell" value=")=====" + DwellValueForSweepMenu + R"=====(" style="width:100%;">
+            </div>
+            <div style="flex:1;">
+                <label>Target Power (dBm):</label>
+                <input type="number" id="sw_att" min="-20" max="20" step="0.1" value=")=====" + AmpValueSweepForSweepMenu + R"=====(" style="width:100%;">
+            </div>
+        </div>
+
+        <label>Type:</label>
+        <select id="sw_type" style="width:100%; margin-bottom:15px;">
+            <option value="Lin" )=====" + String(StepTypeValueForSweepMenu == "Lin" ? "selected" : "") + R"=====(>Linear (LIN)</option>
+            <option value="Log" )=====" + String(StepTypeValueForSweepMenu == "Log" ? "selected" : "") + R"=====(>Logarithmic (LOG)</option>
+        </select>
+
+        <button class="wide-button" id="applySweep" style="background-color:#89b4fa;">LOAD SWEEP SETTINGS</button>
+        <button class="wide-button" id="btn_sweep_toggle" style="background-color:)=====" + btnSweepColor + R"=====(">)=====" + btnSweepText + R"=====(</button>
+    </div>
+
+    <div class="panel">
+      <h2>&#128202; Device Screen (Live)</h2>
+      <div id="live_curr" class="live-item">Current: --.- A</div>
+      <div id="live_volt" class="live-item">Voltage: --.- V</div>
+      <div id="live_power" class="live-item">Power: --.- W</div>
+      <div id="live_temp" class="live-item">Temperature: --.- C</div>
+      <div id="live_pll" class="live-item">LD Result: UNKNOWN</div>
+    </div>
+
+    <div class="panel">
       <h2>Wi-Fi Credentials</h2>
-      <label for="ssid">SSID:</label>
-      <input type="text" id="ssid" name="ssid">
-      <label for="password">Password:</label>
-      <input type="password" id="password" name="password">
-      <button class="wide-button" id="save-credentials">Save</button>
-      <button class="wide-button" id="clear-credentials">Clear Credentials</button>
+      <label>SSID:</label>
+      <input type="text" id="ssid" name="ssid" style="width:100%; margin-bottom:10px;">
+      <label>Password:</label>
+      <input type="password" id="password" name="password" style="width:100%; margin-bottom:10px;">
+      <button class="wide-button" id="save-credentials" style="background-color:#a6e3a1;">Save Credentials</button>
     </div>
 
     <script>
-  document.getElementById('setFrequency').addEventListener('click', () => {
-    const button = document.getElementById('setFrequency');
-    const originalColor = button.style.backgroundColor;
-    const frequency = document.getElementById('frequency').value;
-    const unit = document.getElementById('freqUnit').value;
-    fetch('/setFrequency', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `frequency=${frequency}&unit=${unit}`
-    })
-    .then(response => response.text())
-    .then(data => {
-      button.style.backgroundColor = "green";
-      setTimeout(() => { button.style.backgroundColor = originalColor; }, 1000);
-    });
-  });
+      window.onload = function() {
+          // Add a cache-busting timestamp to force fresh settings retrieval:
+          fetch('/getSettings?t=' + new Date().getTime())
+          .then(response => response.json())
+          .then(data => {
+              document.getElementById('frequency').value = data.cw_freq;
+              document.getElementById('freqUnit').value = data.cw_unit;
+              document.getElementById('amplitude').value = data.cw_amp;
+              document.getElementById('filterSelect').value = data.filt;
+              
+              document.getElementById('sw_start').value = data.sw_start;
+              document.getElementById('sw_start_unit').value = data.sw_start_u;
+              document.getElementById('sw_stop').value = data.sw_stop;
+              document.getElementById('sw_stop_unit').value = data.sw_stop_u;
+              document.getElementById('sw_step').value = data.sw_step;
+              document.getElementById('sw_step_unit').value = data.sw_step_u;
+              document.getElementById('sw_dwell').value = data.sw_dwell;
+              document.getElementById('sw_att').value = data.sw_amp;
+              document.getElementById('sw_type').value = data.sw_type;
+              
+              const btnRf = document.getElementById('btn_rf');
+              if (data.rf_out == 1) {
+                  btnRf.style.backgroundColor = "#a6e3a1";
+                  btnRf.innerText = "RF OUTPUT: ON";
+              } else {
+                  btnRf.style.backgroundColor = "#f38ba8";
+                  btnRf.innerText = "RF OUTPUT: OFF";
+              }
+              
+              const btnSweep = document.getElementById('btn_sweep_toggle');
+              if (data.sw_run == 1) {
+                  btnSweep.style.backgroundColor = "#f38ba8";
+                  btnSweep.innerHTML = "&#9209; STOP SWEEP";
+                  btnRf.style.backgroundColor = "#f9e2af";
+                  btnRf.innerText = "RF OUTPUT: SWP";
+              } else {
+                  btnSweep.style.backgroundColor = "#a6e3a1";
+                  btnSweep.innerHTML = "&#9654; START SWEEP";
+              }
+          })
+          .catch(err => console.log("Sync failed:", err));
+      };
+      
+      function getHz(val, unit) {
+          if(unit === 'KHz') return val * 1e3;
+          if(unit === 'MHz') return val * 1e6;
+          if(unit === 'GHz') return val * 1e9;
+          return val;
+      }
+      function fromHz(hz, unit) {
+          if(unit === 'KHz') return hz / 1e3;
+          if(unit === 'MHz') return hz / 1e6;
+          if(unit === 'GHz') return hz / 1e9;
+          return hz;
+      }
+      function setPreset(target, val, unit) {
+          document.getElementById(target).value = val;
+          document.getElementById(target + '_unit').value = unit;
+      }
 
-  document.getElementById('setAmplitude').addEventListener('click', () => {
-    const button = document.getElementById('setAmplitude');
-    const originalColor = button.style.backgroundColor;
-    const amplitude = document.getElementById('amplitude').value;
-    fetch('/setAmplitude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `amplitude=${amplitude}`
-    })
-    .then(response => response.text())
-    .then(data => {
-      button.style.backgroundColor = "green";
-      setTimeout(() => { button.style.backgroundColor = originalColor; }, 1000);
-    });
-  });
+      // --- CW LOGIC ---
+      document.getElementById('btn_plus').addEventListener('click', () => {
+          let fVal = parseFloat(document.getElementById('frequency').value) || 0;
+          let fUnit = document.getElementById('freqUnit').value;
+          let sVal = parseFloat(document.getElementById('step_val').value) || 0;
+          let sUnit = document.getElementById('stepUnit').value;
+          
+          let fHz = getHz(fVal, fUnit);
+          let sHz = getHz(sVal, sUnit);
+          document.getElementById('frequency').value = parseFloat(fromHz(fHz + sHz, fUnit).toFixed(3));
+      });
 
-  document.getElementById('save-credentials').addEventListener('click', async () => {
-    const button = document.getElementById('save-credentials');
-    const originalColor = button.style.backgroundColor;
-    const ssid = document.getElementById('ssid').value;
-    const password = document.getElementById('password').value;
-    const response = await fetch('/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `ssid=${ssid}&password=${password}`
-    });
-    const result = await response.text();
-    button.style.backgroundColor = "green";
-    setTimeout(() => { button.style.backgroundColor = originalColor; }, 1000);
-  });
+      document.getElementById('btn_minus').addEventListener('click', () => {
+          let fVal = parseFloat(document.getElementById('frequency').value) || 0;
+          let fUnit = document.getElementById('freqUnit').value;
+          let sVal = parseFloat(document.getElementById('step_val').value) || 0;
+          let sUnit = document.getElementById('stepUnit').value;
+          
+          let fHz = getHz(fVal, fUnit);
+          let sHz = getHz(sVal, sUnit);
+          let newHz = fHz - sHz;
+          if(newHz < 0) newHz = 0;
+          document.getElementById('frequency').value = parseFloat(fromHz(newHz, fUnit).toFixed(3));
+      });
 
-  document.getElementById('clear-credentials').addEventListener('click', async () => {
-    const button = document.getElementById('clear-credentials');
-    const originalColor = button.style.backgroundColor;
-    const response = await fetch('/clearWiFi', { method: 'POST' });
-    const result = await response.text();
-    button.style.backgroundColor = "green";
-    setTimeout(() => { button.style.backgroundColor = originalColor; }, 1000);
-    alert(result);
-  });
+      document.getElementById('applyCW').addEventListener('click', () => {
+          const btn = document.getElementById('applyCW');
+          const originalColor = btn.style.backgroundColor;
+          
+          const freq = document.getElementById('frequency').value;
+          const unit = document.getElementById('freqUnit').value;
+          const att = document.getElementById('amplitude').value;
+          const filt = document.getElementById('filterSelect').value;
 
-  // IO Expander functions
-  function setLO1SW1() {
-    const val = document.getElementById("lo1sw1").value;
-    fetch(`/setLO1SW1?value=${val}`)
-      .then(response => response.text())
-      .then(alert)
-      .catch(console.error);
-  }
+          fetch('/applyCW', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `freq=${freq}&unit=${unit}&att=${att}&filt=${filt}`
+          })
+          .then(response => response.text())
+          .then(data => {
+              btn.style.backgroundColor = "#a6e3a1";
+              
+              document.getElementById('btn_sweep_toggle').style.backgroundColor = "#a6e3a1";
+              // Fix: button text markup was cleaned up.
+              document.getElementById('btn_sweep_toggle').innerHTML = "&#9654; START SWEEP";
 
-  function setRFDSA1() {
-    const val = document.getElementById("rfds").value;
-    fetch(`/setRFDSA1?value=${val}`)
-      .then(response => response.text())
-      .then(alert)
-      .catch(console.error);
-  }
+              setTimeout(() => { btn.style.backgroundColor = originalColor; }, 1000);
+          });
+      });
 
-  function setPLL1CE(state) {
-    fetch(`/setPLL1CE?state=${state ? 1 : 0}`)
-      .then(response => response.text())
-      .then(alert)
-      .catch(console.error);
-  }
+      document.getElementById('btn_rf').addEventListener('click', () => {
+          fetch('/toggleRFOutput', { method: 'POST' })
+          .then(response => response.text())
+          .then(state => {
+              const btn = document.getElementById('btn_rf');
+              if(state === "1") {
+                  btn.style.backgroundColor = "#a6e3a1";
+                  btn.innerText = "RF OUTPUT: ON";
+              } else {
+                  btn.style.backgroundColor = "#f38ba8";
+                  btn.innerText = "RF OUTPUT: OFF";
+              }
+          });
+      });
 
-  function setIF1SW1C(state) {
-    fetch(`/setIF1SW1C?state=${state ? 1 : 0}`)
-      .then(response => response.text())
-      .then(alert)
-      .catch(console.error);
-  }
+      // --- SWEEP LOGIC ---
+      document.getElementById('applySweep').addEventListener('click', () => {
+          const btn = document.getElementById('applySweep');
+          const originalColor = btn.style.backgroundColor;
+
+          const start = document.getElementById('sw_start').value;
+          const start_u = document.getElementById('sw_start_unit').value;
+          const stop = document.getElementById('sw_stop').value;
+          const stop_u = document.getElementById('sw_stop_unit').value;
+          const step = document.getElementById('sw_step').value;
+          const step_u = document.getElementById('sw_step_unit').value;
+          const dwell = document.getElementById('sw_dwell').value;
+          const att = document.getElementById('sw_att').value;
+          const type = document.getElementById('sw_type').value;
+
+          fetch('/applySweep', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `start=${start}&start_u=${start_u}&stop=${stop}&stop_u=${stop_u}&step=${step}&step_u=${step_u}&dwell=${dwell}&att=${att}&type=${type}`
+          })
+          .then(response => response.text())
+          .then(data => {
+              btn.style.backgroundColor = "#a6e3a1";
+              setTimeout(() => { btn.style.backgroundColor = originalColor; }, 1000);
+          });
+      });
+
+      document.getElementById('btn_sweep_toggle').addEventListener('click', () => {
+          fetch('/toggleSweep', { method: 'POST' })
+          .then(response => response.text())
+          .then(state => {
+              const btn = document.getElementById('btn_sweep_toggle');
+              if(state === "1") {
+                  btn.style.backgroundColor = "#f38ba8";
+                  // Fix: button text markup was cleaned up.
+                  btn.innerHTML = "&#9209; STOP SWEEP";
+                  document.getElementById('btn_rf').style.backgroundColor = "#f9e2af";
+                  document.getElementById('btn_rf').innerText = "RF OUTPUT: SWP";
+              } else {
+                  btn.style.backgroundColor = "#a6e3a1";
+                  // Fix: button text markup was cleaned up.
+                  btn.innerHTML = "&#9654; START SWEEP";
+                  document.getElementById('btn_rf').style.backgroundColor = "#f38ba8";
+                  document.getElementById('btn_rf').innerText = "RF OUTPUT: OFF";
+              }
+          });
+      });
+
+      // TELEMETRY POLLING
+      setInterval(() => {
+          fetch('/telemetry')
+          .then(response => response.json())
+          .then(data => {
+              document.getElementById('live_curr').innerText = `Current: ${data.curr} A`;
+              document.getElementById('live_volt').innerText = `Voltage: ${data.volt} V`;
+              document.getElementById('live_power').innerText = `Power: ${data.power} W`;
+              document.getElementById('live_temp').innerText = `Temperature: ${data.temp} C`;
+              
+              const pll = document.getElementById('live_pll');
+              if (data.lock === 1) {
+                  pll.innerText = "LD Result: LOCKED";
+                  pll.style.color = "#a6e3a1"; // Green
+              } else {
+                  pll.innerText = "LD Result: UNLOCKED";
+                  pll.style.color = "#f38ba8"; // Red
+              }
+          })
+          .catch(err => console.log(err));
+      }, 1500);
+
+      document.getElementById('save-credentials').addEventListener('click', async () => {
+        const button = document.getElementById('save-credentials');
+        const ssid = document.getElementById('ssid').value;
+        const password = document.getElementById('password').value;
+        await fetch('/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `ssid=${ssid}&password=${password}`
+        });
+        button.innerText = "Saved! Restarting...";
+      });
     </script>
   </div>
 </body>
@@ -568,116 +825,200 @@ String getHTML() {
   return html;
 }
 
-
-void handleSetLO1SW1() {
-  if (server.hasArg("value")) {
-    uint8_t val = server.arg("value").toInt();  // 0-7 arasında bekleniyor
-    SetLO1_SW1(val);
-    server.send(200, "text/plain", "LO1_SW1 updated: " + String(val));
-  } else {
-    server.send(400, "text/plain", "Missing value parameter");
-  }
-}
-
-void handleSetRFDSA1() {
-  if (server.hasArg("value")) {
-    uint8_t val = server.arg("value").toInt();  // 0–31 arası 5-bit veri
-    SetRF_DSA1(val);
-    server.send(200, "text/plain", "RF_DSA1 updated: " + String(val));
-  } else {
-    server.send(400, "text/plain", "Missing value parameter");
-  }
-}
-
-void handleSetPLL1CE() {
-  if (server.hasArg("state")) {
-    bool state = server.arg("state") == "1";
-    SetPLL1_CE(state);
-    server.send(200, "text/plain", "PLL1_CE set to: " + String(state));
-  } else {
-    server.send(400, "text/plain", "Missing state parameter");
-  }
-}
-
-void handleSetIF1SW1C() {
-  if (server.hasArg("state")) {
-    bool state = server.arg("state") == "1";
-    SetIF1_SW1_C(state);
-    server.send(200, "text/plain", "IF1_SW1_C set to: " + String(state));
-  } else {
-    server.send(400, "text/plain", "Missing state parameter");
-  }
-}
-
-
 void handleRoot() {
-  server.send(200, "text/html", getHTML()); // Send the formatted HTML
+  server.send(200, "text/html; charset=utf-8", getHTML()); 
+}
+
+// --------------------------------------------------------------
+// Web API: live telemetry
+// Returns voltage, current, power, temperature, and PLL lock status as JSON.
+// --------------------------------------------------------------
+void handleTelemetry() {
+    String json = "{";
+    json += "\"volt\":\"" + String(last_usb_voltage, 2) + "\",";
+    json += "\"curr\":\"" + String(last_dsg_current, 2) + "\",";
+    json += "\"power\":\"" + String(last_usb_voltage * last_dsg_current, 2) + "\",";
+    json += "\"temp\":\"" + String(temp, 1) + "\",";
+    json += "\"lock\":" + String(last_pll_lock ? 1 : 0);
+    json += "}";
+    server.send(200, "application/json", json);
+}
+
+void handleGetSettings() {
+    extern String FreqValueForMainMenu;
+    extern String FreqUnitForMainMenu;
+    extern String AmpValueForMainMenu;
+    extern String StartValueForSweepMenu;
+    extern String StartUnitForSweepMenu;
+    extern String StopValueForSweepMenu;
+    extern String StopUnitForSweepMenu;
+    extern String StepValueForSweepMenu;
+    extern String StepUnitForSweepMenu;
+    extern String DwellValueForSweepMenu;
+    extern String AmpValueSweepForSweepMenu;
+    extern String StepTypeValueForSweepMenu;
+    extern bool rfOutputEnabled;
+    extern bool isSweepRunning;
+
+    String json = "{";
+    json += "\"cw_freq\":\"" + FreqValueForMainMenu + "\",";
+    json += "\"cw_unit\":\"" + FreqUnitForMainMenu + "\",";
+    json += "\"cw_amp\":\"" + AmpValueForMainMenu + "\",";
+    json += "\"filt\":" + String(FilterStatus ? 1 : 0) + ",";
+    json += "\"sw_start\":\"" + StartValueForSweepMenu + "\",";
+    json += "\"sw_start_u\":\"" + StartUnitForSweepMenu + "\",";
+    json += "\"sw_stop\":\"" + StopValueForSweepMenu + "\",";
+    json += "\"sw_stop_u\":\"" + StopUnitForSweepMenu + "\",";
+    json += "\"sw_step\":\"" + StepValueForSweepMenu + "\",";
+    json += "\"sw_step_u\":\"" + StepUnitForSweepMenu + "\",";
+    json += "\"sw_dwell\":\"" + DwellValueForSweepMenu + "\",";
+    json += "\"sw_amp\":\"" + AmpValueSweepForSweepMenu + "\",";
+    json += "\"sw_type\":\"" + StepTypeValueForSweepMenu + "\",";
+    json += "\"rf_out\":" + String(rfOutputEnabled ? 1 : 0) + ",";
+    json += "\"sw_run\":" + String(isSweepRunning ? 1 : 0);
+    json += "}";
+    server.send(200, "application/json", json);
 }
 
 
+// --------------------------------------------------------------
+// Fan control with hysteresis
+// Fan turns on at 45 C and remains on until temperature falls to 40 C.
+// --------------------------------------------------------------
+static uint8_t fanState = 0;   
 
-void handleSetFrequency() {
-    String frequency = server.arg("frequency");
+void Fan_Init(void)
+{
+    gpio_reset_pin((gpio_num_t)FAN_PIN);
+    gpio_set_direction((gpio_num_t)FAN_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)FAN_PIN, 0);   
+}
+
+void Fan_Control(float temp_val)
+{
+    // Turn ON the fan if temperature exceeds 45.0 C
+    if (!fanState && temp_val >= 45.0)
+    {
+        gpio_set_level((gpio_num_t)FAN_PIN, 1);
+        fanState = 1;
+    }
+    // Turn OFF the fan if temperature falls below 40.0 C
+    else if (fanState && temp_val <= 40.0)
+    {
+        gpio_set_level((gpio_num_t)FAN_PIN, 0);
+        fanState = 0;
+    }
+}
+
+// --------------------------------------------------------------
+// Web API: apply CW settings
+// Maps browser inputs to the existing SCPI command handler.
+// --------------------------------------------------------------
+void handleApplyCW() {
+    // Stop sweep mode while preserving the current RF output state (rfOutputEnabled).
+    isSweepRunning = false; 
+
+    String freq = server.arg("freq");
     String unit = server.arg("unit");
+    String att = server.arg("att");
+    String filt = server.arg("filt");
 
-    long long tempFrequency = atoll(frequency.c_str()); // long long kullanıyoruz
+    // 1. Switch the display to CW mode. The existing RF state is preserved while redrawing the screen.
+    RC_HandleLine((char*)"DISP:MENU CW");
 
-    currentFrequency = String(tempFrequency);
-    currentFreqUnit = unit; 
+    // 2. Convert web input values into SCPI-style commands and pass them to the system.
+    String cmdFreq = "FREQ " + freq + unit;
+    RC_HandleLine((char*)cmdFreq.c_str());
 
-    Serial.print("Set Frequency: ");
-    Serial.print(currentFrequency);
-    Serial.print("(");
-    Serial.print(currentFreqUnit);
-    Serial.println(")");
+    String cmdFilt = String("FILT ") + (filt == "1" ? "ON" : "OFF");
+    RC_HandleLine((char*)cmdFilt.c_str());
 
-    SetFreq(currentFrequency); // Update display
-    SetFreqUnit(currentFreqUnit); 
-    if (checkenteredFreqValue()) 
-    {
-      drawMainMenu(); 
-      updateFreqArea();
-    }
-    else
-    {
-      server.send(400, "text/plain", "Invalid frequency! Frequency must be between 48 MHzand 22.6 GHz.");
-    }
-    return;
- 
-    server.send(200, "text/plain", "Frequency set!");
- 
+    // Trigger the automatic power-level handling through POW:LEV.
+    String cmdPow = "POW:LEV " + att;
+    RC_HandleLine((char*)cmdPow.c_str());
+
+    // Removed the previously unnecessary OUTP OFF and rfOutputEnabled = false behavior from this path.
+
+    // Store the latest values so the device can retain them after restart.
+    currentFrequency = freq;
+    currentFreqUnit = unit;
+    currentAmplitude = att;
+
+    server.send(200, "text/plain", "CW Settings Applied");
 }
 
-void handleSetAmplitude() {
-  String amplitude = server.arg("amplitude");
-  currentAmplitude = amplitude;
+// --------------------------------------------------------------
+// Web API: apply sweep settings
+// Maps browser sweep inputs to the existing SCPI command handler.
+// --------------------------------------------------------------
+void handleApplySweep() {
+    // 1. Switch the display to Sweep mode.
+    RC_HandleLine((char*)"DISP:MENU SWP");
 
-//if (currentAmplitude >= -30 && currentAmplitude <= 30) { 
+    String start = server.arg("start");
+    String start_u = server.arg("start_u");
+    String stop = server.arg("stop");
+    String stop_u = server.arg("stop_u");
+    String step = server.arg("step");
+    String step_u = server.arg("step_u");
+    String dwell = server.arg("dwell");
+    String att = server.arg("att");
+    String type = server.arg("type");
 
-//Girilen AMP değeri kontrolu ekle. 
+    // 2. Convert all sweep parameters into SCPI-style commands and pass them to the system.
+    String cmdStart = "SWEEP:STAR " + start + start_u;
+    RC_HandleLine((char*)cmdStart.c_str());
 
-//}
+    String cmdStop = "SWEEP:STOP " + stop + stop_u;
+    RC_HandleLine((char*)cmdStop.c_str());
 
-  Serial.print("Set Amplitude: ");
-  Serial.print(currentAmplitude);
-  Serial.println(" dBm");
+    String cmdStep = "SWEEP:STEP " + step + step_u;
+    RC_HandleLine((char*)cmdStep.c_str());
 
-  SetAmp(currentAmplitude); // Update display
-  drawMainMenu();
-  updateAmpArea();
-  //saveRFSettings(); // Save to Preferences should be called on Demand
-  server.send(200, "text/plain", "Amplitude set!");
-  //server.send(400, "text/plain", "Invalid amplitude! Amplitude must be between -30 dBm and +30 dBm.");
+    String cmdDwell = "SWEEP:DWEL " + dwell;
+    RC_HandleLine((char*)cmdDwell.c_str());
+
+    // Target power setting used for sweep mode.
+    String cmdPow = "SWEEP:POW " + att;
+    RC_HandleLine((char*)cmdPow.c_str());
+
+    String cmdType = "SWEEP:TYPE " + type;
+    RC_HandleLine((char*)cmdType.c_str());
+
+    server.send(200, "text/plain", "Sweep Settings Applied");
 }
 
 
+// --------------------------------------------------------------
+// Web API: start/stop sweep mode
+// Updates RF output state and refreshes the sweep screen.
+// --------------------------------------------------------------
+void handleToggleSweep() {
+    isSweepRunning = !isSweepRunning;
+    currentMenu = SWEEP_MENU;
+    
+    if (isSweepRunning) {
+        currentHz = 0; 
+        SetRfOnOff(true);
+        rfOutputEnabled = true;
+    } else {
+        SetRfOnOff(false);
+        rfOutputEnabled = false;
+    }
+    
+    drawSweepMenu(); 
 
+    server.send(200, "text/plain", isSweepRunning ? "1" : "0");
+}
+
+// --------------------------------------------------------------
+// Non-blocking Wi-Fi state machine
+// Attempts stored Wi-Fi credentials first, then falls back to hotspot mode.
+// --------------------------------------------------------------
 void manageWiFiConnection() {
   static unsigned long lastCheckTime = 0;
-  
   switch (wifiState) {
     case WIFI_INIT:
-      
       readWiFiCredentials();
       SetWifiStatus(WIFI_STATUS_OFF);
       if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
@@ -690,9 +1031,8 @@ void manageWiFiConnection() {
         wifiState = WIFI_HOTSPOT;
       }
       break;
-
     case WIFI_CONNECTING:
-      if (millis() - wifiStartTime > 2000) { // 2 saniyede bir kontrol et
+      if (millis() - wifiStartTime > 2000) { 
         wifiStartTime = millis();
         if (WiFi.status() == WL_CONNECTED) {
           wifiState = WIFI_CONNECTED;
@@ -704,18 +1044,14 @@ void manageWiFiConnection() {
         } else {
           wifiRetryCount++;
           ConnectionStatus("Retrying WiFi...", true);
-          if (wifiRetryCount >= 10) { // 10 kez denedikten sonra başarısız say
+          if (wifiRetryCount >= 10) { 
             wifiState = WIFI_HOTSPOT;
           }
         }
       }
       break;
-
     case WIFI_CONNECTED:
-      // WiFi başarılı, hiçbir şey yapmaya gerek yok
-      // Burada ara ara wifi connectionkontrol edilecek ve konnetion kopmus ise WIFI_CONNECTING state ine gidilebilir (eger bu stte uygunise tabiki)
       break;
-
     case WIFI_HOTSPOT:
     {
       ConnectionStatus("Hotspot...", true);
@@ -730,7 +1066,6 @@ void manageWiFiConnection() {
           delay(500);
       }
 
-      // IP bastır
       ConnectionStatus("Hotspot IP:", true);
       ConnectionStatus(WiFi.softAPIP().toString().c_str(), true);
       InitServer();
@@ -740,50 +1075,58 @@ void manageWiFiConnection() {
       break;
     }
     case WIFI_FAILED:
-      // Hotspot açık olduğu için burada ekstra bir işlem yapmaya gerek yok
       break;
   }
 }
 
-unsigned long lastUpdateTime = 0;
- 
+unsigned long lastUpdateTime1, lastUpdateTime2 = 0;
 
+// --------------------------------------------------------------
+// Main runtime loop
+// Handles touch input, fan control, serial command processing, sweep execution, web client handling, and screen telemetry updates.
+// --------------------------------------------------------------
 void loop() {
-
   unsigned long currentTime = millis();
   
-  while (Serial.available()) 
+  handleTouch();
+  if (currentTime - lastUpdateTime1 >= 1000)
   {
-    RC_ProcessByte((uint8_t)Serial.read()); 
+    lastUpdateTime1 = currentTime;
+    temp = Read_Temp();
+    Fan_Control(temp);
   }
 
-  ArduinoOTA.handle();
-  server.handleClient();
-  handleTouch();
-
-  manageWiFiConnection();
-
-
-  if (currentTime - lastUpdateTime >= 500)
+  while (Serial.available()) 
   {
-    lastUpdateTime = currentTime;
+    RC_ProcessByte((uint8_t)Serial.read());
+  }
 
-
+  if (isSweepRunning && currentMenu == SWEEP_MENU)
+  {
+     RunSweep();
+     server.handleClient(); 
+     return; 
+  }
+  
+  server.handleClient();
+  manageWiFiConnection();
+  
+  if (currentTime - lastUpdateTime2 >= 500)
+  {
+    lastUpdateTime2 = currentTime;
     if (currentMenu == MAIN_MENU)
     {
-      float temp = Read_Temp();
-      float usb_voltage = Read_5V_Voltage();
-      float dsg_current = Read_5V_Current();
+      last_usb_voltage = Read_5V_Voltage();
+      last_dsg_current = Read_5V_Current();
+      last_pll_lock = isPLL_Locked();
 
+      SetLock(last_pll_lock);
       SetTemp(String(temp, 1).c_str());
-      SetUSBVoltge(String(usb_voltage, 1).c_str()); 
-    }else if (currentMenu == INFO_MENU)
+      SetUSBVoltge(String(last_usb_voltage, 1).c_str()); 
+    }
+    else if (currentMenu == INFO_MENU)
     {
       drawInfoScreen();
     }
-
-
   } 
-
-  
 }

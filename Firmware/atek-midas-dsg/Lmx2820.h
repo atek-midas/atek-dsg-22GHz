@@ -8,16 +8,16 @@
 #define MISO_           13   // SPI MISO Pin
 
 void Lmx2820SetOUTA_PWR(uint8_t OUTA_PWR);
-bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock);
+void Lmx2820SetOUTB_PWR(uint8_t OUTB_PWR);
+bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock , bool isFilteredChA);
+void Lmx2820SetFreqinMHz_Fast(double target_freq , double ref_clock);
 void PLL_write(uint8_t address, uint16_t Data);
 uint16_t PLL_read(uint8_t address);
 void InitPLL();
 bool isPLL_Locked();
 void SetPLLToDefault();
 void DumpPLLRegisters();
-void SetPLLTo6000Ref100MHz();
-void SetPLLTo3500Ref100MHz();
-// VCO limitleri
+// VCO limits
 #define VCO_MIN 5650000000  // 5.65 GHz
 #define VCO_MAX 11300000000 // 11.3 GHz
 

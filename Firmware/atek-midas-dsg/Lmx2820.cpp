@@ -1,4 +1,8 @@
-
+/*
+ * LMX2820 PLL control implementation.
+ * This file configures PLL output power, frequency synthesis, SPI register access,
+ * default register loading, lock detection, and register dump diagnostics.
+ */
 #include "main.h"
 #include "Lmx2820.h"
 
@@ -8,16 +12,35 @@
 #define PLL_R_PRE 1
 #include <SPI.h>
 
-// R79: OUTB_PD=1 (bit8), OUTB_MUX=01 (bits5:4), OUTA_PWR=val (bits3:1), diğerleri 0
-void Lmx2820SetOUTA_PWR(uint8_t val)
+uint32_t OUTA_MUX, OUTB_MUX;
+uint32_t OUTA_PD, OUTB_PD;
+uint8_t OUTA_PWR=7,OUTB_PWR=7;
+
+// R79: OUTA power control register.
+void Lmx2820SetOUTA_PWR(uint8_t OUTA_PWR_i)
 {
-  if (val > 7) val = 7;                 // 3-bit sınır
-  uint32_t r79 = (1u << 8) | (1u << 4) | ((val & 0x7u) << 1);
-  PLL_write(0x4F, r79);                  // OUTB_MUX=01’e zorlar (default)
+  OUTA_PWR = OUTA_PWR_i;
+  if (OUTA_PWR > 7) OUTA_PWR = 7;              
+  uint32_t R79 = (OUTB_PD << 8) | (OUTB_MUX << 4) | ((OUTA_PWR & 0x7u) << 1);
+  PLL_write(0x4F, R79);                   
+}
+
+// R80: OUTB power control register.
+void Lmx2820SetOUTB_PWR(uint8_t OUTB_PWR_i)
+{
+  OUTB_PWR = OUTB_PWR_i;
+  if (OUTB_PWR > 7) OUTB_PWR = 7;                 
+  uint32_t R80 =   ((OUTB_PWR & 0x7u) << 6);
+  PLL_write(0x50, R80);     
 }
 
 
-bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)  
+/*
+ * Configures the LMX2820 output frequency in MHz.
+ * The function selects the required VCO path, output divider, channel mux,
+ * and PLL integer/fractional divider registers, then checks PLL lock status.
+ */
+bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock , bool isFilteredChA)  
 {
 	target_freq = target_freq*1000000;
   char buf[64];
@@ -29,35 +52,164 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)
   //Serial.println(buf);
 	//Serial.println("\r\n");
 
-	   uint8_t cikis_bolucu = 1;
-	    double vco_frekansi = target_freq * cikis_bolucu;
+	   uint8_t output_divider = 1;
+	    double vco_frequency = target_freq * output_divider;
 	    uint8_t DBLR_CAL_EN = 0;
 
-	    // Eğer hedef frekans VCO max'tan büyükse doubler kullan
+	    // If the target frequency is above the VCO maximum, use the doubler.
 	    if (target_freq > VCO_MAX) {
-	        vco_frekansi = target_freq / 2;
+	        vco_frequency = target_freq / 2;
 	        DBLR_CAL_EN = 1;
 	    }
 
-	    // Eğer hedef frekans VCO min'in altındaysa uygun çıkış bölücüyü bul
+	    // If the target frequency is below the VCO minimum, find a suitable output divider.
 	    if (target_freq < VCO_MIN) {
 	        for (int i = 7; i >= 1; i--) {
 	            if ((target_freq * pow(2, i)) < VCO_MAX) {
-	                cikis_bolucu = (1 << i);
+	                output_divider = (1 << i);
 	                break;
 	            }
 	        }
-	        vco_frekansi = target_freq * cikis_bolucu;
+	        vco_frequency = target_freq * output_divider;
 	    }
 
-	    // PFD Frekansı Hesaplaması
-	    double PFD_FREKANSI = (ref_clock * OSC_2X * MULT) / (PLL_R_PRE);
+	    // PFD frequency calculation.
+	    double PFD_FREQUENCY = (ref_clock * OSC_2X * MULT) / (PLL_R_PRE);
 
-	    // N Divider Integer ve Fractional Bileşenlerini Doğru Hesapla
-	    double N_divider_exact = vco_frekansi / PFD_FREKANSI;
-	    uint32_t PLL_N = (uint32_t)N_divider_exact;  // Tam sayı bileşeni
+	    // Calculate the N-divider integer and fractional components.
+	    double N_divider_exact = vco_frequency / PFD_FREQUENCY;
+	    uint32_t PLL_N = (uint32_t)N_divider_exact;  // Integer component.
 
-	    // Hassas Fractional hesaplama
+	    // Precise fractional calculation.
+	    double N_fractional = round((N_divider_exact - PLL_N) * PLL_DEN) / PLL_DEN;
+	    uint32_t PLL_NUM = (uint32_t)(N_fractional * PLL_DEN);
+	    double N_fractional_final = (double)PLL_NUM / PLL_DEN;
+
+ 
+    uint32_t CHDIVA,CHDIVB;
+
+    switch (output_divider) {
+        case 2:   CHDIVA = 0; break;
+        case 4:   CHDIVA = 1; break;
+        case 8:   CHDIVA = 2; break;
+        case 16:  CHDIVA = 3; break;
+        case 32:  CHDIVA = 4; break;
+        case 64:  CHDIVA = 5; break;
+        case 128: CHDIVA = 6; break;
+        default:  CHDIVA = 7;  
+                  break;
+    }
+
+  CHDIVB = CHDIVA;
+
+    if (target_freq < VCO_MIN) 
+    {
+        OUTA_MUX = 0x0; // Channel divider
+      
+    }
+    else if (target_freq >= VCO_MIN && target_freq <= VCO_MAX)
+    {
+        OUTA_MUX = 0x1;// VCO
+    }
+    else
+    {
+        OUTA_MUX = 0x2;// Doubler
+    }
+
+    OUTB_MUX = OUTA_MUX;
+
+
+    if (isFilteredChA)
+    {
+      OUTA_PD = 0; // 0 means Powered UP
+      OUTB_PD = 1; 
+    } 
+    else
+    {
+      OUTA_PD = 1; // 0 means Powered UP
+      OUTB_PD = 0; 
+    }
+
+    uint32_t R78 = (OUTA_PD << 4) | (OUTA_MUX);
+    uint32_t R79 = (OUTB_PD << 8) | (OUTB_MUX << 4) | ((OUTA_PWR & 0x7u) << 1);
+    uint32_t R80 = ((OUTB_PWR & 0x7u) << 6);
+
+    // Register values
+    uint32_t reg_N = PLL_N;
+    uint32_t reg_NUM1 = (PLL_NUM >> 16) & 0xFFFF;
+    uint32_t reg_NUM2 = PLL_NUM & 0xFFFF;
+    uint32_t reg_DEN1 = (PLL_DEN >> 16) & 0xFFFF;
+    uint32_t reg_DEN2 = PLL_DEN & 0xFFFF;
+
+    uint32_t reg_R_DIV = ((CHDIVA) << 6) | ((CHDIVB) << 9) | 0x1001;
+    uint16_t read_val;
+
+    PLL_write(0x2C, 0x8000);
+
+    PLL_write(0x24, reg_N);
+
+    PLL_write(0x2B, reg_NUM2);
+
+    PLL_write(0x50, R80); 
+    PLL_write(0x4F, R79);
+    PLL_write(0x4E, R78);
+    
+
+    PLL_write(0x2A, reg_NUM1);
+
+    PLL_write(0x27, reg_DEN2);
+
+    PLL_write(0x26, reg_DEN1);
+
+    PLL_write(0x20, reg_R_DIV);
+
+    PLL_write(0x00, 0x6070);
+ 
+    delay(50);
+    // Check Lock Detect
+    return isPLL_Locked();
+  
+}
+
+/*
+ * Fast frequency update path.
+ * This function updates only the frequency-related PLL registers and skips
+ * the full lock-check flow used by the standard frequency configuration function.
+ */
+void Lmx2820SetFreqinMHz_Fast(double target_freq , double ref_clock)  
+{
+	target_freq = target_freq*1000000;
+
+
+	   uint8_t output_divider = 1;
+	    double vco_frequency = target_freq * output_divider;
+	    uint8_t DBLR_CAL_EN = 0;
+
+	    // If the target frequency is above the VCO maximum, use the doubler.
+	    if (target_freq > VCO_MAX) {
+	        vco_frequency = target_freq / 2;
+	        DBLR_CAL_EN = 1;
+	    }
+
+	    // If the target frequency is below the VCO minimum, find a suitable output divider.
+	    if (target_freq < VCO_MIN) {
+	        for (int i = 7; i >= 1; i--) {
+	            if ((target_freq * pow(2, i)) < VCO_MAX) {
+	                output_divider = (1 << i);
+	                break;
+	            }
+	        }
+	        vco_frequency = target_freq * output_divider;
+	    }
+
+	    // PFD frequency calculation.
+	    double PFD_FREQUENCY = (ref_clock * OSC_2X * MULT) / (PLL_R_PRE);
+
+	    // Calculate the N-divider integer and fractional components.
+	    double N_divider_exact = vco_frequency / PFD_FREQUENCY;
+	    uint32_t PLL_N = (uint32_t)N_divider_exact;  // Integer component.
+
+	    // Precise fractional calculation.
 	    double N_fractional = round((N_divider_exact - PLL_N) * PLL_DEN) / PLL_DEN;
 	    uint32_t PLL_NUM = (uint32_t)(N_fractional * PLL_DEN);
 	    double N_fractional_final = (double)PLL_NUM / PLL_DEN;
@@ -65,7 +217,7 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)
  
     uint32_t CHDIVA;
 
-    switch (cikis_bolucu) {
+    switch (output_divider) {
         case 2:   CHDIVA = 0; break;
         case 4:   CHDIVA = 1; break;
         case 8:   CHDIVA = 2; break;
@@ -81,7 +233,7 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)
 
     if (target_freq < VCO_MIN) 
     {
-        OUTA_MUX = 0x0; //Channel divider
+        OUTA_MUX = 0x0; // Channel divider
       
     }
     else if (target_freq >= VCO_MIN && target_freq <= VCO_MAX)
@@ -94,7 +246,7 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)
     }
 
 
-	    // Register değerleri
+	    // Register values.
 	    uint32_t reg_N = PLL_N;
 	    uint32_t reg_NUM1 = (PLL_NUM >> 16) & 0xFFFF;
 	    uint32_t reg_NUM2 = PLL_NUM & 0xFFFF;
@@ -105,69 +257,21 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock)
       uint16_t read_val;
 
       PLL_write(0x2C, 0x8000);
-      //read_val = PLL_read(0x2C);
-      //printf("Reg 0x2C: Wrote 0x%04X, Read back 0x%04X\r\n", 0x8000, read_val);
-
       PLL_write(0x24, reg_N);
-      //read_val = PLL_read(0x24);
-      //printf("Reg 0x24: Wrote 0x%04X, Read back 0x%04X\r\n", reg_N, read_val);
-
       PLL_write(0x2B, reg_NUM2);
-      //read_val = PLL_read(0x2B);
-      //printf("Reg 0x2B: Wrote 0x%04X, Read back 0x%04X\r\n", reg_NUM2, read_val);
-
       PLL_write(0x4E, OUTA_MUX);
-      //read_val = PLL_read(0x4E);
-      //printf("Reg 0x4E: Wrote 0x%04X, Read back 0x%04X\r\n", OUTA_MUX, read_val);
-
       PLL_write(0x2A, reg_NUM1);
-      //read_val = PLL_read(0x2A);
-      //printf("Reg 0x2A: Wrote 0x%04X, Read back 0x%04X\r\n", reg_NUM1, read_val);
-
       PLL_write(0x27, reg_DEN2);
-      //read_val = PLL_read(0x27);
-      //printf("Reg 0x27: Wrote 0x%04X, Read back 0x%04X\r\n", reg_DEN2, read_val);
-
       PLL_write(0x26, reg_DEN1);
-      //read_val = PLL_read(0x26);
-      //printf("Reg 0x26: Wrote 0x%04X, Read back 0x%04X\r\n", reg_DEN1, read_val);
-
       PLL_write(0x20, reg_R_DIV);
-      //read_val = PLL_read(0x20);
-      //printf("Reg 0x20: Wrote 0x%04X, Read back 0x%04X\r\n", reg_R_DIV, read_val);
-
-      //delay(50);
       PLL_write(0x00, 0x6070);
-      //read_val = PLL_read(0x00);
-      //printf("Reg 0x00: Wrote 0x%04X, Read back 0x%04X\r\n", 0x6070, read_val);
 
-
-  /*
-		char buffer[100];
-		sprintf(buffer, "VCO Freq: %.2f MHz\r\n", vco_frekansi / 1000000.0);
-		Serial.print(buffer);
-		sprintf(buffer, "PFD Freq: %.2f MHz\r\n", PFD_FREKANSI  / 1000000.0);
-		Serial.print(buffer);
-		sprintf(buffer, "N Divider Exact: %.5f\r\n", N_divider_exact);
-		Serial.print(buffer);
-		sprintf(buffer, "PLL_N (Integer): %d\r\n", PLL_N);
-		Serial.print(buffer);
-		sprintf(buffer, "N Fractional: %.5f\r\n", N_fractional);
-		Serial.print(buffer);
-		sprintf(buffer, "PLL_NUM: %d (0x%04X)\r\n", PLL_NUM, PLL_NUM);
-		Serial.print(buffer);
-		sprintf(buffer, "PLL_DEN: %d (0x%04X)\r\n", PLL_DEN, PLL_DEN);
-		Serial.print(buffer);
-		sprintf(buffer, "Cikis Bolucu: %d\r\n", cikis_bolucu);
-		Serial.print(buffer);
-    Serial.print("\r\n");
-  */
-    delay(50);
-    // Check Lock Detect
-     return isPLL_Locked();
   
 }
 
+/*
+ * Reads the PLL lock-detect status and returns true when the PLL is locked.
+ */
 bool isPLL_Locked() {
     delay(1);
     uint16_t read_val = PLL_read(0x4A);
@@ -186,12 +290,15 @@ bool isPLL_Locked() {
 
 
 
+/*
+ * Reads a 16-bit value from the selected PLL register over SPI.
+ */
 uint16_t PLL_read(uint8_t address) {
     address |= 0x80;  // read operation
     uint8_t spi_buf[2];
 
     digitalWrite(PLL_CS, LOW);  // pull the pin low
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
     SPI.transfer(&address, 1);       // send address
     SPI.transfer(spi_buf, 2);        // receive 2 bytes data
     SPI.endTransaction();
@@ -200,7 +307,7 @@ uint16_t PLL_read(uint8_t address) {
     return (uint16_t)((spi_buf[0] << 8) | spi_buf[1]);
 }
 
-// PLL_write fonksiyonu
+// PLL write function.
 void PLL_write(uint8_t address, uint16_t Data) {
     address &= 0x7F;  // write operation
     uint8_t spi_buf[2];
@@ -208,7 +315,7 @@ void PLL_write(uint8_t address, uint16_t Data) {
     spi_buf[0] = highByte(Data);
 
     digitalWrite(PLL_CS, LOW);  // pull the pin low
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
     SPI.transfer(&address, 1);       // send address
     SPI.transfer(spi_buf, 2);        // send data
     SPI.endTransaction();
@@ -217,6 +324,10 @@ void PLL_write(uint8_t address, uint16_t Data) {
 
 
 
+/*
+ * Initializes the PLL SPI interface, verifies basic SPI read/write access,
+ * and loads the default PLL register map.
+ */
 void InitPLL()
 {
 
@@ -224,12 +335,12 @@ void InitPLL()
   pinMode(PLL_CS, OUTPUT);
   digitalWrite(PLL_CS, HIGH); 
 
-	// Test for SPI accessibility Test (address 63 used as a test address)
-	PLL_write(63,0x0000); 				// Test Write PLL
-	uint16_t dumy1_0x0000 = PLL_read(63); 	// Test Read PLL
-	SetPLLToDefault(); // Sets all regs to default value.
+	// Test SPI accessibility using register address 63.
+	PLL_write(63,0x0000); 				// Test PLL write operation.
+	uint16_t dumy1_0x0000 = PLL_read(63); 	// Test PLL read operation.
+	SetPLLToDefault(); // Set all registers to their default values.
 
-	uint16_t dumy1_0xC350 = PLL_read(63); 	// Test Read PLL
+	uint16_t dumy1_0xC350 = PLL_read(63); 	// Test PLL read operation.
 	//
 	if (dumy1_0xC350==0xC350 && dumy1_0x0000 ==0x0000)
 	{
@@ -242,6 +353,9 @@ void InitPLL()
 
 }
 
+/*
+ * Loads the default PLL register values in descending register order.
+ */
 void SetPLLToDefault()
 {
 	  uint16_t Regs1[123];
@@ -350,7 +464,7 @@ void SetPLLToDefault()
 
 	  for (int i = 122; i >= 0; --i) {
 
-			PLL_write(i,Regs1[i]); //  descending order.
+			PLL_write(i,Regs1[i]); // Descending register order.
 	    delay(1);
 	  }
 
@@ -358,19 +472,21 @@ void SetPLLToDefault()
 
  
 
+/*
+ * Prints all PLL register values for diagnostics and verification.
+ */
 void DumpPLLRegisters() {
   Serial.println("------ PLL Register Dump ------");
   for (int i = 122; i >= 0; --i) {
     uint16_t value = PLL_read(i);
     Serial.print("Reg[");
-    if (i < 10) Serial.print("0");  // Tek haneli adresler için ön sıfır
+    if (i < 10) Serial.print("0");  // Leading zero for single-digit register addresses.
     Serial.print(i);
     Serial.print("] = 0x");
-    if (value < 0x1000) Serial.print("0"); // Görsel hizalama için
+    if (value < 0x1000) Serial.print("0"); // Used for visual alignment.
     if (value < 0x100) Serial.print("0");
     if (value < 0x10) Serial.print("0");
     Serial.println(value, HEX);
   }
   Serial.println("-------------------------------");
 }
-
