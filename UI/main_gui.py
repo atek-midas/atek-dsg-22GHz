@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QComboBox, QGroupBox, QTextEdit, QDoubleSpinBox, QSpinBox, QTabWidget,
     QAbstractSpinBox, QMessageBox, QFileDialog
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QLocale
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QLocale, QProcess
 
 from DSG_Remote import DSG_Remote
 
@@ -206,6 +206,7 @@ class DSGMainWindow(QMainWindow):
         self.worker.sync_data.connect(self.sync_ui_with_device)
 
         self.rf_state = False
+        self.firmware_process = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -233,7 +234,6 @@ class DSGMainWindow(QMainWindow):
         h_conn.addWidget(self.combo_port)
         h_conn.addWidget(self.btn_refresh)
         h_conn.addWidget(self.btn_connect)
-        h_conn.addWidget(self.btn_load_cal)
         h_conn.addStretch()
         main_layout.addLayout(h_conn)
 
@@ -420,6 +420,32 @@ class DSGMainWindow(QMainWindow):
         sw_layout.addWidget(self.btn_sweep_toggle, 7, 0, 1, 4)
         sw_layout.setRowStretch(8, 1)
         self.tabs.addTab(tab_sweep, "📈 Sweep")
+
+        # --- TAB 3: SETTINGS ---
+        tab_settings = QWidget()
+        settings_layout = QVBoxLayout(tab_settings)
+        settings_layout.setSpacing(15)
+
+        group_cal = QGroupBox("Calibration")
+        cal_layout = QVBoxLayout(group_cal)
+        self.btn_load_cal.setMinimumHeight(40)
+        cal_layout.addWidget(self.btn_load_cal)
+        settings_layout.addWidget(group_cal)
+
+        group_firmware = QGroupBox("Firmware")
+        firmware_layout = QVBoxLayout(group_firmware)
+
+        self.btn_firmware_update = QPushButton("⬆️ FIRMWARE UPDATE")
+        self.btn_firmware_update.setMinimumHeight(40)
+        self.btn_firmware_update.setStyleSheet(
+            f"background-color: {COLOR_ACCENT}; color: #11111b; font-weight: bold; padding: 8px;")
+        self.btn_firmware_update.clicked.connect(self.flash_firmware)
+        firmware_layout.addWidget(self.btn_firmware_update)
+        settings_layout.addWidget(group_firmware)
+
+        settings_layout.addStretch()
+        self.tabs.addTab(tab_settings, "⚙️ Settings")
+
         h_body.addWidget(self.tabs, stretch=2)
 
         # Live device telemetry panel: current, voltage, power, temperature, and PLL lock state.
@@ -779,6 +805,73 @@ class DSGMainWindow(QMainWindow):
         except Exception as e:
             self.append_log(f"[ERR] CSV yükleme hatası: {str(e)}")
 
+    def flash_firmware(self):
+        """Selected .bin dosyasını esptool üzerinden (Arduino IDE gerekmeden) cihaza yükler."""
+        port = self.combo_port.currentText()
+        if not port:
+            QMessageBox.warning(self, "Port Seçilmedi", "Lütfen önce bir COM portu seçin.")
+            return
+
+        # Seri port zaten açıksa (bağlıysa), flash işleminden önce serbest bırak.
+        if self.worker.running:
+            self.append_log("[FW] Flash işlemi öncesi mevcut bağlantı kapatılıyor...")
+            self.toggle_connection()
+
+        filepath, _ = QFileDialog.getOpenFileName(self, "Firmware (.bin) Dosyası Seç", "",
+                                                   "Binary Files (*.bin);;All Files (*)")
+        if not filepath:
+            return
+
+        reply = QMessageBox.question(
+            self, "Firmware Güncelleme",
+            f"Seçilen dosya:\n{filepath}\n\nPort: {port}\n\nFlash işlemine başlansın mı?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.btn_firmware_update.setEnabled(False)
+        self.append_log(f"[FW] Firmware yükleniyor: {filepath}")
+        self.append_log(f"[FW] Port: {port}")
+
+        args = [
+            "-m", "esptool",
+            "--chip", "esp32s3",
+            "--port", port,
+            "--baud", "460800",
+            "write_flash", "0x0", filepath
+        ]
+
+        self.firmware_process = QProcess(self)
+        self.firmware_process.setProgram(sys.executable)
+        self.firmware_process.setArguments(args)
+        self.firmware_process.readyReadStandardOutput.connect(self._read_firmware_stdout)
+        self.firmware_process.readyReadStandardError.connect(self._read_firmware_stderr)
+        self.firmware_process.finished.connect(self._firmware_flash_finished)
+        self.firmware_process.start()
+
+    def _read_firmware_stdout(self):
+        data = bytes(self.firmware_process.readAllStandardOutput()).decode(errors="ignore")
+        for line in data.splitlines():
+            if line.strip():
+                self.append_log(f"[FW] {line.strip()}")
+
+    def _read_firmware_stderr(self):
+        data = bytes(self.firmware_process.readAllStandardError()).decode(errors="ignore")
+        for line in data.splitlines():
+            if line.strip():
+                self.append_log(f"[FW] {line.strip()}")
+
+    def _firmware_flash_finished(self, exit_code, exit_status):
+        self.btn_firmware_update.setEnabled(True)
+        if exit_code == 0:
+            self.append_log("[FW] Firmware güncelleme tamamlandı.")
+            QMessageBox.information(self, "Tamamlandı", "Firmware başarıyla güncellendi.")
+        else:
+            self.append_log(f"[FW] Firmware güncelleme başarısız oldu (exit code: {exit_code}).")
+            QMessageBox.critical(self, "Hata", "Firmware güncelleme başarısız oldu. Detaylar için System Logs'a bakın.")
+        self.firmware_process = None
+
     def sync_ui_with_device(self, data):
         """Cihazdan gelen JSON paketi ile arayüzdeki tüm kutuları doldurur."""
         try:
@@ -811,4 +904,3 @@ if __name__ == "__main__":
     w = DSGMainWindow()
     w.show()
     sys.exit(app.exec())
-
