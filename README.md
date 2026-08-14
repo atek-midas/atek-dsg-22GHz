@@ -104,15 +104,6 @@ A Python-based desktop GUI (**"DSG 22.6 GHz - Professional Control Center"**) is
 3. In the top-left **Port** dropdown, click **REFRESH** to scan for available serial ports, then select the port corresponding to your DSG device.
 4. Click **CONNECT**. Once connected, the UI and the DSG device are linked and ready for the next step.
 
-### Loading a Calibration File
-
-Before using any of the generator functions, you must load the calibration file specific to your DSG unit — **each DSG device ships with its own unique calibration file**, and using the wrong one will produce inaccurate output power.
-
-1. Click **LOAD CALIBRATION**.
-2. Select the calibration file that corresponds to your specific DSG device.
-
-Once the calibration file is loaded, the UI is ready to use.
-
 ---
 
 ### CW (Continuous Wave) Tab
