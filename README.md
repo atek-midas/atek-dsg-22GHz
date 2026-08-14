@@ -89,6 +89,8 @@ A Python-based desktop GUI (**"DSG 22.6 GHz - Professional Control Center"**) is
 |---|---|
 | [`pyserial`](https://pypi.org/project/pyserial/) | Serial (USB) communication with the DSG device |
 | [`PyQt6`](https://pypi.org/project/PyQt6/) | Graphical user interface framework |
+| [`esptool`](https://pypi.org/project/esptool/) | Flashes ESP32-S3 firmware (.bin) directly from the UI's Firmware Update feature |
+
 
 *(`sys`, `time`, `datetime`, and `json` are part of the Python standard library and require no separate installation.)*
 
