@@ -164,6 +164,38 @@ The **Sweep** tab configures the DSG to automatically scan across a range of fre
 8. Click **START SWEEP** to begin scanning across the configured frequency range.
 
 ---
+## Settings Tab
+
+![Settings Tab](docs/images/settings_tab.png)
+
+The Settings tab includes 'Load Calibration' and 'Firmware Update' buttons.   
+
+The "Load Calibration" button is used to load a frequency-based calibration file.
+
+### Firmware Update (from the UI)
+
+The **Settings** tab includes a **FIRMWARE UPDATE** button that flashes a `.bin` file to the DSG directly from the UI, using `esptool` — no Arduino IDE required.
+ 
+**Preparing the `.bin` file:**
+ 
+Arduino IDE's "Export Compiled Binary" produces three separate files (bootloader, partition table, application). These must be merged into a single flashable image before using the UI's Firmware Update feature.
+ 
+Run the following command in the folder containing the three exported files:
+ 
+```bash
+python -m esptool --chip esp32s3 merge_bin -o merged-firmware.bin --flash-mode keep --flash-freq keep --flash-size keep 0x0 <your-sketch-name>.ino.bootloader.bin 0x8000 <your-sketch-name>.ino.partitions.bin 0x10000 <your-sketch-name>.ino.bin
+```
+ 
+> ⚠️ **Important:** Always use `--flash-mode keep --flash-freq keep --flash-size keep` (not explicit values like `qio`/`80m`/`4MB`). Overriding these values manually was found to corrupt the merged image in a way that flashes "successfully" but leaves the device screen blank / device non-functional on boot. Using `keep` preserves the original settings already embedded in the exported files by Arduino IDE, which resolves this.
+ 
+**Flashing:**
+ 
+1. Connect the DSG via USB-C and select its port in the **Port** dropdown.
+2. Go to the **Settings** tab and click **FIRMWARE UPDATE**.
+3. Select the merged `.bin` file (e.g. `merged-firmware.bin`).
+4. Confirm the prompt. Progress is streamed to the System Logs panel.
+
+---
 
 ### Device Screen (Live)
 
