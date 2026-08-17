@@ -42,6 +42,11 @@ float last_dsg_current = 0.0;
 bool last_pll_lock = false;
 float temp = 0.0; 
 
+// Firmware build timestamp, auto-generated at compile time.
+// __DATE__ format: "Aug 13 2026", __TIME__ format: "14:32:51"
+// Combined result matches: "Aug 13 2026 14:32:51"
+const char* FW_BUILD_TIMESTAMP = __DATE__ " " __TIME__;
+
 char* FloatToChar(float avg) {
     static char buffer[20];
     snprintf(buffer, sizeof(buffer), "%.2f", avg); 

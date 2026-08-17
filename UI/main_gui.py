@@ -504,6 +504,14 @@ class DSGMainWindow(QMainWindow):
         log_layout.addWidget(self.txt_log)
         main_layout.addLayout(log_layout, stretch=1)
 
+        # --- FOOTER: firmware version, shown bottom-left once the device is connected ---
+        h_footer = QHBoxLayout()
+        self.lbl_fw_version = QLabel("Firmware: --")
+        self.lbl_fw_version.setStyleSheet(f"color: #6c7086; font-size: 9pt;")
+        h_footer.addWidget(self.lbl_fw_version)
+        h_footer.addStretch()
+        main_layout.addLayout(h_footer)
+
         self.refresh_ports()
         self.update_freq_step()
 
@@ -587,6 +595,7 @@ class DSGMainWindow(QMainWindow):
             self.lbl_power.setText("Power: --.- W")
             self.lbl_temp.setText("Temperature: --.- C")
             self.lbl_pll.setText("LD Result: UNKNOWN")
+            self.lbl_fw_version.setText("Firmware: --")
             self.lbl_pll.setStyleSheet(
                 f"background-color: #11111b; padding: 8px; border-radius: 4px; font-size: 13pt; font-weight: bold; color: {COLOR_WARNING};")
 
@@ -875,6 +884,10 @@ class DSGMainWindow(QMainWindow):
     def sync_ui_with_device(self, data):
         """Cihazdan gelen JSON paketi ile arayüzdeki tüm kutuları doldurur."""
         try:
+            fw_build = data.get("fw_build", "")
+            if fw_build:
+                self.lbl_fw_version.setText(f"Firmware: {fw_build}")
+
             self.spin_freq.setValue(float(data.get("cw_freq", 1000)))
             self.combo_unit.setCurrentText(data.get("cw_unit", "MHz"))
             self.spin_att.setValue(float(data.get("cw_amp", 0)))

@@ -862,8 +862,10 @@ static void h_sync(char *args, int q) {
     extern String DwellValueForSweepMenu;
     extern String AmpValueSweepForSweepMenu;
     extern String StepTypeValueForSweepMenu;
+    extern const char* FW_BUILD_TIMESTAMP;
 
     String json = "{";
+    json += "\"fw_build\":\"" + String(FW_BUILD_TIMESTAMP) + "\",";
     json += "\"cw_freq\":\"" + FreqValueForMainMenu + "\",";
     json += "\"cw_unit\":\"" + FreqUnitForMainMenu + "\",";
     json += "\"cw_amp\":\"" + AmpValueForMainMenu + "\",";

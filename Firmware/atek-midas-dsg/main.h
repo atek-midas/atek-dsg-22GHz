@@ -16,6 +16,9 @@ extern String currentFreqUnit;
 extern bool FilterStatus; 
 extern bool RFStatus;
 
+// Firmware build timestamp, generated at compile time from __DATE__/__TIME__.
+// Format matches: "Aug 13 2026 14:32:51"
+extern const char* FW_BUILD_TIMESTAMP;
 
 extern bool rfOutputEnabled; 
 
