@@ -743,16 +743,6 @@ if (prev_currentMenu == SWEEP_MENU) {
   currentMenu = MAIN_MENU;
   tft.pushImage(0, 0, 320, 170, (uint16_t*)MainMenu);
 
-  // --- Visual label override: replace Amp with Pow on the button ---
-  uint16_t btnGrey = tft.color565(210, 210, 210); // Original button gray
-  tft.fillRect(4, 54, 76, 34, btnGrey);           // Draw a gray box over the existing Amp label.
-  tft.drawRect(4, 54, 76, 34, tft.color565(150, 150, 150)); // Draw the button border.
-  tft.setTextColor(tft.color565(50, 50, 50), btnGrey);
-  tft.setFreeFont(&FreeSansBold12pt7b);
-  tft.setCursor(14, 77); // Center the text.
-  tft.print("Pow");
-  // ------------------------------------------------
-
   SetFreqOnMainMenu(FreqValueForMainMenu);
   SetFreqUnitOnMainMenu(FreqUnitForMainMenu);
   SetAmpOnMainMenu(AmpValueForMainMenu);
@@ -777,21 +767,6 @@ void drawSweepMenu()
   currentHz = 0;
 
   tft.pushImage(0, 0, 320, 170, (uint16_t*)SweepMenu);
-  
-  // --- Visual label override for the Sweep menu ---
-  // Match the background color with the other gray buttons.
-  uint16_t btnGrey = tft.color565(210, 210, 210); // Original button gray (RGB)
-  
-  tft.fillRect(186, 5, 68, 32, btnGrey); // Draw a gray box over the existing Amp label.
-  
-  // Draw a thin border so the patch visually matches the original button style.
-  tft.drawRect(186, 5, 68, 32, tft.color565(150, 150, 150)); 
-  
-  tft.setTextColor(tft.color565(50, 50, 50), btnGrey); 
-  tft.setFreeFont(&FreeSansBold12pt7b);
-  tft.setCursor(192, 28);
-  tft.print("Pow");
-  // ---------------------------------------------------------------------------------
 
   if (isSweepRunning) {
     tft.pushImage(270, 125, 36, 36, (uint16_t*)Pause);
