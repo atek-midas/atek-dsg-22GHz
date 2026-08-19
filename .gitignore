@@ -9,3 +9,9 @@ venv/
 # Editor & IDE settings
 .idea/
 .vscode/
+
+# Draw.io temporary and backup files
+.*.drawio.dtmp
+.*.drawio.bkp
+*.dtmp
+*.bkp
