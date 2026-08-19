@@ -763,6 +763,13 @@ if (prev_currentMenu == SWEEP_MENU) {
 
 void drawSweepMenu()
 {
+  // Capture which sub-menu we are returning FROM before currentMenu gets
+  // overwritten below. The commit checks further down need this old value -
+  // previously they checked currentMenu AFTER it was already set to
+  // SWEEP_MENU, so DWELL_MENU/SWP_COUNT_MENU (and the others) could never
+  // match, and the entered Dwell/Count value was silently discarded.
+  MenuState enteredFrom = currentMenu;
+
   currentMenu = SWEEP_MENU;
   currentHz = 0;
 
@@ -777,12 +784,12 @@ void drawSweepMenu()
   // Display the Type (Lin/Log) information on the screen.
   SetTypeOnSweepMenu(StepTypeValueForSweepMenu);
 
-  if (currentMenu == START_MENU) { StartValueForSweepMenu = enteredFreqValue; }
-  else if (currentMenu == STOP_MENU) { StopValueForSweepMenu = enteredFreqValue; }
-  else if (currentMenu == STEP_MENU) { StepValueForSweepMenu = enteredFreqValue; }      
-  else if (currentMenu == DWELL_MENU) { DwellValueForSweepMenu = enteredDecimalValue; }    
-  else if (currentMenu == AMP_MENU) { AmpValueSweepForSweepMenu = enteredAmpValue; }
-  else if (currentMenu == SWP_COUNT_MENU) { CountValueForSweepMenu = enteredDecimalValue; }
+  if (enteredFrom == START_MENU) { StartValueForSweepMenu = enteredFreqValue; }
+  else if (enteredFrom == STOP_MENU) { StopValueForSweepMenu = enteredFreqValue; }
+  else if (enteredFrom == STEP_MENU) { StepValueForSweepMenu = enteredFreqValue; }      
+  else if (enteredFrom == DWELL_MENU) { DwellValueForSweepMenu = enteredDecimalValue; }    
+  else if (enteredFrom == AMP_MENU) { AmpValueSweepForSweepMenu = enteredAmpValue; }
+  else if (enteredFrom == SWP_COUNT_MENU) { CountValueForSweepMenu = enteredDecimalValue; }
 
   SetStartFreqOnSweepMenu(StartValueForSweepMenu);
   SetStopFreqOnSweepMenu(StopValueForSweepMenu);
