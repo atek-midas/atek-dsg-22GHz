@@ -48,9 +48,80 @@ The generator offers outstanding spectral performance:
 
 ## Interfaces & Control
 
+- Capacitive touch display for direct device control 
 - **USB control** with SCPI-like command set  
 - **Wi-Fi web interface** for browser-based control in the field  
-- Capacitive touch display for direct device control 
+
+## Touch display Usage
+The device features an integrated touchscreen interface for controlling the DSG. Upon startup, the display defaults to the Continuous Wave (CW) tab.
+
+![DSP CW Tab](docs/images/display_cw_tab.png)
+
+**1-PLL Lock Status**
+![PLL Status](docs/images/pll_lock_status.png)
+Indicates the Phase-Locked Loop (PLL) lock status.
+
+**2-PCB Temperature**
+
+**3-USB Voltage**
+
+**4-Built-in Test Result**
+![bit test](docs/images/bit_test.png)
+
+**5-IP Address**
+Hotspot(AP) IP or (depending on icon 6) Client (STA) IP
+
+**6-Built-in Test Result**
+![bit test1](docs/images/bit_test_1.png)
+
+**7-Save Button**
+![save btn](docs/images/save_button.png)
+
+**8-RF On/Off button**
+![rf btn](docs/images/rf_button.png)
+
+**9-Frequency Setting Menu Button**
+![freq btn](docs/images/freq_button.png)
+Enter the desired frequency value, select the unit (KHz, MHz, or GHz), and tap the green enter button (↵) to save.
+
+**10-Power Settings Menu Button**
+![pow btn](docs/images/pow_button.png)
+Enter the desired power value (in dBm) and tap the green enter button (↵) to confirm.
+
+**11-Filter On/Off**
+![filter status](docs/images/filter_status.png)
+
+**To switch from the Continuous Wave tab to the Sweep tab, swipe right on the touchscreen display.**
+
+![DSP SWEEP Tab](docs/images/display_sweep_tab.png)
+
+**12-Frequency Start Button**
+Sets the starting frequency for the sweep.
+
+**13-Frequency Stop Button**
+Sets the stop frequency for the sweep.
+
+**14-Step Button**
+Sets the frequency step interval for the sweep.
+
+**15-Dwell Time Button**
+This button sets the dwell time, which determines how long the signal stays at each frequency step during the sweep.
+
+**16-Power Button**
+Sets the output power level (in dBm) for the sweep operation.
+
+**17-Count Button**
+Sets the total number of sweep iterations. Enter 0 for continuous execution.
+
+**18-Sweep Start/Stop Button**
+
+![DSP Screen](docs/images/display_physical_screen.png)
+Tap the circular touch button on the right side of the display frame to switch to the Monitoring menu.
+
+**19-Monitoring Menu Button**
+![mon menu](docs/images/monitoring_menu.png)
+
+
 
 ## DSG Control UI (Desktop Application)
 
