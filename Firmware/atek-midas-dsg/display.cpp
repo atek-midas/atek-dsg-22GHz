@@ -53,7 +53,7 @@ String prev_DwellValueForSweepMenu = "";
 String AmpValueSweepForSweepMenu = "10";
 String prev_AmpValueSweepForSweepMenu = "";
 
-String CountValueForSweepMenu = "1000";
+String CountValueForSweepMenu = "0"; // 0 = run forever (matches previous behavior, since Count had no effect before)
 String prev_CountValueForSweepMenu = "";
 
 String StepTypeValueForSweepMenu = "Lin";
@@ -103,6 +103,11 @@ int Ypos7890G = 127; // Buttons 7, 8, 9, 0 and GHz
 
 bool isSweepRunning = false;
 double currentHz = 0;  
+
+// Counts how many full sweep cycles (start->stop wrap) have completed since
+// the sweep was (re)started. Used by RunSweep() to stop automatically once
+// CountValueForSweepMenu is reached (0 = run forever, unchanged behavior).
+uint32_t sweepCycleCount = 0;
 
 bool CurrentLockStatus = false;
 bool CurrentBITStatus = true;
@@ -342,6 +347,7 @@ void GetTouchData(int x, int y) {
         isSweepRunning = !isSweepRunning;
         if (isSweepRunning)
         {
+          sweepCycleCount = 0; // Reset cycle counter every time a sweep run is (re)started.
           tft.pushImage(270, 125, 36, 36, (uint16_t*)Pause);
           SetPLL1OnOff(true);
         }
@@ -1403,6 +1409,31 @@ extern void Lmx2820SetOUTB_PWR(uint8_t OUTB_PWR_i);
 // Advances the frequency according to dwell time, updates PLL/filter state, and
 // calculates the attenuation value from calibration data.
 // -----------------------------------------------------------------------------
+// Called whenever a sweep reaches its stop frequency and is about to wrap
+// back around to the start frequency (i.e. one full sweep cycle has just
+// completed). Increments the completed-cycle counter and, if the user has
+// configured a non-zero sweep count (CountValueForSweepMenu) that has now
+// been reached, stops the sweep automatically - mirroring the same actions
+// taken when the Start/Stop button is pressed on the touchscreen.
+// CountValueForSweepMenu == "0" (the default) means "run forever", matching
+// the sweep's previous (unlimited) behavior.
+static bool SweepCycleCompleted_ShouldStop() {
+    sweepCycleCount++;
+    long targetCount = CountValueForSweepMenu.toInt(); // 0 = run forever
+    if (targetCount > 0 && sweepCycleCount >= (uint32_t)targetCount) {
+        isSweepRunning = false;
+        tft.pushImage(270, 125, 36, 36, (uint16_t*)Play);
+        SetPLL1OnOff(false);
+        // Distinct, easy-to-match status line so a connected PC/GUI can tell
+        // the sweep stopped by itself (Count reached) rather than because the
+        // user pressed Stop - the GUI already reads every line sent over
+        // serial during a sweep, so no new polling/query is required.
+        Serial.println("SWEEP:DONE");
+        return true;
+    }
+    return false;
+}
+
 void RunSweep()
 {
    static unsigned long lastUpdate = 0;
@@ -1554,7 +1585,9 @@ void RunSweep()
           currentHz *= ratio;  
       } 
       else {
-          currentHz = startHz; 
+          // Reached the stop frequency - one full sweep cycle just completed.
+          currentHz = startHz;
+          if (SweepCycleCompleted_ShouldStop()) return;
       }
   }
   else {  
@@ -1562,7 +1595,9 @@ void RunSweep()
       double nextHz = currentHz + stepHz;
       
       if (nextHz > stopHz) {
-          nextHz = startHz;  
+          // Reached the stop frequency - one full sweep cycle just completed.
+          nextHz = startHz;
+          if (SweepCycleCompleted_ShouldStop()) { currentHz = startHz; return; }
       }
 
       currentHz = nextHz;

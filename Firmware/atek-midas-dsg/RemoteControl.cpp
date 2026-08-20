@@ -46,6 +46,8 @@ extern String StepUnitForSweepMenu;
 extern String DwellValueForSweepMenu;
 extern String AmpValueSweepForSweepMenu;
 extern String StepTypeValueForSweepMenu;
+extern String CountValueForSweepMenu;
+extern uint32_t sweepCycleCount;
 extern void SetTypeOnSweepMenu(String type);
 extern void SetAmpAmpOnSweepMenu(String value);
 
@@ -122,6 +124,7 @@ static void h_sweep_start(char*, int);
 static void h_sweep_stop(char*, int);
 static void h_sweep_step(char*, int);
 static void h_sweep_dwell(char*, int);
+static void h_sweep_count(char*, int);
 static void h_sweep_pow(char*, int);
 static void h_sweep_type(char*, int);
 static void h_sweep_init(char*, int);
@@ -159,6 +162,7 @@ static const scpi_cmd_t scpi_table[] = {
   { "SWEEP:STOP",  h_sweep_stop  },
   { "SWEEP:STEP",  h_sweep_step  },
   { "SWEEP:DWEL",  h_sweep_dwell },
+  { "SWEEP:COUN",  h_sweep_count },
   { "SWEEP:POW",   h_sweep_pow   },
   { "SWEEP:TYPE",  h_sweep_type  },
   { "SWEEP:INIT",  h_sweep_init  },
@@ -725,6 +729,22 @@ static void h_sweep_dwell(char *args, int q) {
     rc_writeln("0");
 }
 
+// Sets how many full sweep cycles to run before stopping automatically.
+// 0 (the default) means "run forever", matching the sweep's original
+// (unlimited) behavior.
+static void h_sweep_count(char *args, int q) {
+    if (q) { rc_writeln("0"); return; }
+    if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
+    char *endp = nullptr;
+    long count = strtol(args, &endp, 10);
+    if (!endp || *endp!=0 || count < 0) { rc_writeln("-104,Data type error"); return; }
+    CountValueForSweepMenu = String(count);
+    if (currentMenu == SWEEP_MENU) {
+        SetSCountOnSweepMenu(CountValueForSweepMenu); 
+    }
+    rc_writeln("0");
+}
+
 static void h_sweep_pow(char *args, int q) {
     if (q) { rc_writeln("0"); return; }
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
@@ -764,6 +784,7 @@ static void h_sweep_type(char *args, int q) {
 static void h_sweep_init(char *args, int q) {
     if (q) { rc_writeln("0"); return; }
     currentHz = 0; // Reset to restart the sweep from the beginning
+    sweepCycleCount = 0; // Reset cycle counter every time a sweep run is (re)started.
     isSweepRunning = true;
     SetRfOnOff(true); // Safe RF turn on (via display.cpp)
     drawSweepMenu();  // Automatically switch screen to Sweep UI (Must stay here)
@@ -862,10 +883,9 @@ static void h_sync(char *args, int q) {
     extern String DwellValueForSweepMenu;
     extern String AmpValueSweepForSweepMenu;
     extern String StepTypeValueForSweepMenu;
-    extern const char* FW_BUILD_TIMESTAMP;
+    extern String CountValueForSweepMenu;
 
     String json = "{";
-    json += "\"fw_build\":\"" + String(FW_BUILD_TIMESTAMP) + "\",";
     json += "\"cw_freq\":\"" + FreqValueForMainMenu + "\",";
     json += "\"cw_unit\":\"" + FreqUnitForMainMenu + "\",";
     json += "\"cw_amp\":\"" + AmpValueForMainMenu + "\",";
@@ -878,7 +898,8 @@ static void h_sync(char *args, int q) {
     json += "\"sw_step_u\":\"" + StepUnitForSweepMenu + "\",";
     json += "\"sw_dwell\":\"" + DwellValueForSweepMenu + "\",";
     json += "\"sw_amp\":\"" + AmpValueSweepForSweepMenu + "\",";
-    json += "\"sw_type\":\"" + StepTypeValueForSweepMenu + "\"";
+    json += "\"sw_type\":\"" + StepTypeValueForSweepMenu + "\",";
+    json += "\"sw_count\":\"" + CountValueForSweepMenu + "\"";
     json += "}";
 
     rc_writeln(json.c_str());

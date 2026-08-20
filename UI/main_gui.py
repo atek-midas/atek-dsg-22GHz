@@ -61,6 +61,7 @@ class ScpiWorker(QThread):
     connection_changed = pyqtSignal(bool)
     telemetry_data = pyqtSignal(dict)
     sync_data = pyqtSignal(dict)
+    sweep_auto_stopped = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -93,6 +94,14 @@ class ScpiWorker(QThread):
         if "Freq(MHz):" in resp:
             freq_str = resp.split("Freq(MHz):")[-1].strip()
             self.log_msg.emit(f"〰 {freq_str}")
+            return
+        if resp.strip() == "SWEEP:DONE":
+            # The device stopped the sweep on its own (configured Count
+            # reached), not because the user pressed Stop. Let the GUI know
+            # so it can reset the toggle button - otherwise it would keep
+            # showing "STOP SWEEP" even though the sweep already finished.
+            self.is_sweeping = False
+            self.sweep_auto_stopped.emit()
             return
         if self.is_sweeping:
             return
@@ -204,6 +213,7 @@ class DSGMainWindow(QMainWindow):
         self.worker.connection_changed.connect(self.on_connection_changed)
         self.worker.telemetry_data.connect(self.update_sensors)
         self.worker.sync_data.connect(self.sync_ui_with_device)
+        self.worker.sweep_auto_stopped.connect(self.on_sweep_auto_stopped)
 
         self.rf_state = False
         self.firmware_process = None
@@ -379,6 +389,12 @@ class DSGMainWindow(QMainWindow):
         self.sw_dwell.setDecimals(0)
         self.sw_dwell.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
+        self.sw_count = QSpinBox()
+        self.sw_count.setRange(0, 999999)
+        self.sw_count.setValue(0)  # 0 = run forever
+        self.sw_count.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.sw_count.setSpecialValueText("∞ (Continuous)")
+
         self.sw_pow = QDoubleSpinBox()
         self.sw_pow.setRange(-20.0, 20.0);
         self.sw_pow.setValue(4.0);
@@ -406,6 +422,8 @@ class DSGMainWindow(QMainWindow):
         sw_layout.addWidget(self.sw_pow, 4, 1, 1, 2)
         sw_layout.addWidget(QLabel("Type:"), 5, 0);
         sw_layout.addWidget(self.sw_type, 5, 1, 1, 2)
+        sw_layout.addWidget(QLabel("Sweep Count (0 = ∞):"), 6, 0);
+        sw_layout.addWidget(self.sw_count, 6, 1, 1, 2)
 
         btn_apply_sw = QPushButton("LOAD SWEEP SETTINGS")
         btn_apply_sw.clicked.connect(self.apply_sweep_settings)
@@ -416,9 +434,9 @@ class DSGMainWindow(QMainWindow):
             f"background-color: {COLOR_SUCCESS}; color: #000; font-size: 12pt; padding: 12px; font-weight: bold;")
         self.btn_sweep_toggle.clicked.connect(self.toggle_sweep)
 
-        sw_layout.addWidget(btn_apply_sw, 6, 0, 1, 4)
-        sw_layout.addWidget(self.btn_sweep_toggle, 7, 0, 1, 4)
-        sw_layout.setRowStretch(8, 1)
+        sw_layout.addWidget(btn_apply_sw, 7, 0, 1, 4)
+        sw_layout.addWidget(self.btn_sweep_toggle, 8, 0, 1, 4)
+        sw_layout.setRowStretch(9, 1)
         self.tabs.addTab(tab_sweep, "📈 Sweep")
 
         # --- TAB 3: SETTINGS ---
@@ -504,14 +522,6 @@ class DSGMainWindow(QMainWindow):
         log_layout.addWidget(self.txt_log)
         main_layout.addLayout(log_layout, stretch=1)
 
-        # --- FOOTER: firmware version, shown bottom-left once the device is connected ---
-        h_footer = QHBoxLayout()
-        self.lbl_fw_version = QLabel("Firmware: --")
-        self.lbl_fw_version.setStyleSheet(f"color: #6c7086; font-size: 9pt;")
-        h_footer.addWidget(self.lbl_fw_version)
-        h_footer.addStretch()
-        main_layout.addLayout(h_footer)
-
         self.refresh_ports()
         self.update_freq_step()
 
@@ -595,7 +605,6 @@ class DSGMainWindow(QMainWindow):
             self.lbl_power.setText("Power: --.- W")
             self.lbl_temp.setText("Temperature: --.- C")
             self.lbl_pll.setText("LD Result: UNKNOWN")
-            self.lbl_fw_version.setText("Firmware: --")
             self.lbl_pll.setStyleSheet(
                 f"background-color: #11111b; padding: 8px; border-radius: 4px; font-size: 13pt; font-weight: bold; color: {COLOR_WARNING};")
 
@@ -646,6 +655,7 @@ class DSGMainWindow(QMainWindow):
         self.worker.send_cmd(f":SWEEP:STOP {self.sw_stop.value()}{self.sw_stop_u.currentText()}")
         self.worker.send_cmd(f":SWEEP:STEP {self.sw_step.value()}{self.sw_step_u.currentText()}")
         self.worker.send_cmd(f":SWEEP:DWEL {self.sw_dwell.value()}")
+        self.worker.send_cmd(f":SWEEP:COUN {self.sw_count.value()}")
         self.worker.send_cmd(f":SWEEP:POW {self.sw_pow.value()}")
         t_type = "LIN" if self.sw_type.currentIndex() == 0 else "LOG"
         self.worker.send_cmd(f":SWEEP:TYPE {t_type}")
@@ -675,7 +685,17 @@ class DSGMainWindow(QMainWindow):
 
     def stop_sweep(self):
         self.worker.abort_sweep_urgent()
+        self._reset_sweep_ui(">>> Sweep Stopped.")
 
+    def on_sweep_auto_stopped(self):
+        # Called when the device stopped the sweep on its own (the configured
+        # Sweep Count was reached) rather than the user pressing Stop. The
+        # worker has already set is_sweeping = False and the device has
+        # already turned the sweep/PLL off, so we only need to bring the UI
+        # (button labels/colors) back in sync - no abort command needed.
+        self._reset_sweep_ui(">>> Sweep finished (reached configured Count).")
+
+    def _reset_sweep_ui(self, log_text):
         self.btn_sweep_toggle.setText("▶ START SWEEP")
         self.btn_sweep_toggle.setStyleSheet(
             f"background-color: {COLOR_SUCCESS}; color: #000; font-size: 12pt; padding: 12px; font-weight: bold;")
@@ -684,7 +704,7 @@ class DSGMainWindow(QMainWindow):
         self.btn_rf.setText("RF OUTPUT: OFF")
         self.btn_rf.setStyleSheet(
             f"border: 2px solid {COLOR_ERROR}; color: {COLOR_ERROR}; padding: 15px; font-size: 14pt;")
-        self.append_log(">>> Sweep Stopped.")
+        self.append_log(log_text)
 
     # -------------------------------------------------------------------------
     # GUI telemetry update
@@ -884,10 +904,6 @@ class DSGMainWindow(QMainWindow):
     def sync_ui_with_device(self, data):
         """Cihazdan gelen JSON paketi ile arayüzdeki tüm kutuları doldurur."""
         try:
-            fw_build = data.get("fw_build", "")
-            if fw_build:
-                self.lbl_fw_version.setText(f"Firmware: {fw_build}")
-
             self.spin_freq.setValue(float(data.get("cw_freq", 1000)))
             self.combo_unit.setCurrentText(data.get("cw_unit", "MHz"))
             self.spin_att.setValue(float(data.get("cw_amp", 0)))
@@ -900,6 +916,7 @@ class DSGMainWindow(QMainWindow):
             self.sw_step.setValue(float(data.get("sw_step", 100)))
             self.sw_step_u.setCurrentText(data.get("sw_step_u", "MHz"))
             self.sw_dwell.setValue(float(data.get("sw_dwell", 1)))
+            self.sw_count.setValue(int(float(data.get("sw_count", 0))))
             self.sw_pow.setValue(float(data.get("sw_amp", 10)))
 
             t_type = data.get("sw_type", "Lin")
