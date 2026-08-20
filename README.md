@@ -52,7 +52,7 @@ The generator offers outstanding spectral performance:
 - **USB control** with SCPI-like command set  
 - **Wi-Fi web interface** for browser-based control in the field  
 
-## Touch display Usage
+## Touch Display Usage
 
 The device features an integrated touchscreen interface for controlling the DSG. Upon startup, the display defaults to the **Continuous Wave (CW)** tab.
 
