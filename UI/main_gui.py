@@ -522,6 +522,13 @@ class DSGMainWindow(QMainWindow):
         log_layout.addWidget(self.txt_log)
         main_layout.addLayout(log_layout, stretch=1)
 
+        # Firmware build timestamp, shown bottom-left (status bar). Populated
+        # once the device connects and sends its :SYNC? data (see
+        # sync_ui_with_device); reset to "--" on disconnect.
+        self.lbl_fw_version = QLabel("Firmware: --")
+        self.lbl_fw_version.setStyleSheet(f"color: {COLOR_TEXT}; padding: 2px 8px;")
+        self.statusBar().addWidget(self.lbl_fw_version)
+
         self.refresh_ports()
         self.update_freq_step()
 
@@ -607,6 +614,7 @@ class DSGMainWindow(QMainWindow):
             self.lbl_pll.setText("LD Result: UNKNOWN")
             self.lbl_pll.setStyleSheet(
                 f"background-color: #11111b; padding: 8px; border-radius: 4px; font-size: 13pt; font-weight: bold; color: {COLOR_WARNING};")
+            self.lbl_fw_version.setText("Firmware: --")
 
             self.rf_state = False
             self.btn_rf.setText("RF OUTPUT: OFF")
@@ -921,6 +929,10 @@ class DSGMainWindow(QMainWindow):
 
             t_type = data.get("sw_type", "Lin")
             self.sw_type.setCurrentIndex(0 if t_type == "Lin" else 1)
+
+            fw_build = data.get("fw_build")
+            if fw_build:
+                self.lbl_fw_version.setText(f"Firmware: {fw_build}")
 
             self.append_log("[SYS] State Synchronized with Device Screen.")
         except Exception as e:

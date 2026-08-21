@@ -884,6 +884,7 @@ static void h_sync(char *args, int q) {
     extern String AmpValueSweepForSweepMenu;
     extern String StepTypeValueForSweepMenu;
     extern String CountValueForSweepMenu;
+    extern const char* FW_BUILD_TIMESTAMP;
 
     String json = "{";
     json += "\"cw_freq\":\"" + FreqValueForMainMenu + "\",";
@@ -899,7 +900,8 @@ static void h_sync(char *args, int q) {
     json += "\"sw_dwell\":\"" + DwellValueForSweepMenu + "\",";
     json += "\"sw_amp\":\"" + AmpValueSweepForSweepMenu + "\",";
     json += "\"sw_type\":\"" + StepTypeValueForSweepMenu + "\",";
-    json += "\"sw_count\":\"" + CountValueForSweepMenu + "\"";
+    json += "\"sw_count\":\"" + CountValueForSweepMenu + "\",";
+    json += "\"fw_build\":\"" + String(FW_BUILD_TIMESTAMP) + "\"";
     json += "}";
 
     rc_writeln(json.c_str());
