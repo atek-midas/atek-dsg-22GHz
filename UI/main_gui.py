@@ -566,12 +566,12 @@ class DSGMainWindow(QMainWindow):
             mhz_val = value * 1000.0
 
         if mhz_val < 150.0:
-            QMessageBox.warning(self, "Geçersiz Değer",
-                                "150 MHz'den az. Lütfen 150 MHz ile 22.6 GHz arası değer girin.")
+            QMessageBox.warning(self, "Invalid Value",
+                                "Below 150 MHz. Please enter a value between 150 MHz and 22.6 GHz.")
             return False
         elif mhz_val > 22600.0:
-            QMessageBox.warning(self, "Geçersiz Değer",
-                                "22.6 GHz'den büyük değer girdiniz. Lütfen 150 MHz ile 22.6 GHz arası değer girin.")
+            QMessageBox.warning(self, "Invalid Value",
+                                "You entered a value above 22.6 GHz. Please enter a value between 150 MHz and 22.6 GHz.")
             return False
         return True
 
@@ -762,7 +762,7 @@ class DSGMainWindow(QMainWindow):
     # small paced batches to avoid overloading the serial communication buffer.
     # -------------------------------------------------------------------------
     def load_calibration_csv(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Kalibrasyon CSV Dosyası Seç", "",
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Calibration CSV File", "",
                                                   "CSV Files (*.csv);;All Files (*)")
         if not filepath:
             return
@@ -772,10 +772,10 @@ class DSGMainWindow(QMainWindow):
                 lines = f.readlines()
 
             if len(lines) < 2:
-                self.append_log("[ERR] CSV dosyası boş veya geçersiz!")
+                self.append_log("[ERR] CSV file is empty or invalid!")
                 return
 
-            self.append_log("[CAL] Kalibrasyon verileri okunuyor...")
+            self.append_log("[CAL] Reading calibration data...")
             self.worker.send_cmd(":CAL:CLEAR")
 
             success_count = 0
@@ -826,41 +826,41 @@ class DSGMainWindow(QMainWindow):
             time.sleep(0.1)  # Final short delay before saving calibration data.
             self.worker.send_cmd(":CAL:SAVE")
 
-            self.append_log(f"[CAL] Aktarım Tamamlandı! Toplam {success_count} satır cihaza yüklendi.")
-            QMessageBox.information(self, "Yükleme Tamamlandı",
-                                    f"Toplam {success_count} frekans noktası cihaza aktarıldı.\n"
-                                    f"Cihaz bu verileri kalıcı hafızasına kaydetti.")
+            self.append_log(f"[CAL] Transfer Complete! {success_count} rows uploaded to device in total.")
+            QMessageBox.information(self, "Upload Complete",
+                                    f"A total of {success_count} frequency points were transferred to the device.\n"
+                                    f"The device has saved this data to its persistent memory.")
 
         except Exception as e:
-            self.append_log(f"[ERR] CSV yükleme hatası: {str(e)}")
+            self.append_log(f"[ERR] CSV upload error: {str(e)}")
 
     def flash_firmware(self):
-        """Selected .bin dosyasını esptool üzerinden (Arduino IDE gerekmeden) cihaza yükler."""
+        """Uploads the selected .bin file to the device via esptool (no Arduino IDE required)."""
         port = self.combo_port.currentText()
         if not port:
-            QMessageBox.warning(self, "Port Seçilmedi", "Lütfen önce bir COM portu seçin.")
+            QMessageBox.warning(self, "No Port Selected", "Please select a COM port first.")
             return
 
-        # Seri port zaten açıksa (bağlıysa), flash işleminden önce serbest bırak.
+        # If the serial port is already open (connected), release it before flashing.
         if self.worker.running:
-            self.append_log("[FW] Flash işlemi öncesi mevcut bağlantı kapatılıyor...")
+            self.append_log("[FW] Closing existing connection before flashing...")
             self.toggle_connection()
 
-        filepath, _ = QFileDialog.getOpenFileName(self, "Firmware (.bin) Dosyası Seç", "",
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Firmware (.bin) File", "",
                                                    "Binary Files (*.bin);;All Files (*)")
         if not filepath:
             return
 
         reply = QMessageBox.question(
-            self, "Firmware Güncelleme",
-            f"Seçilen dosya:\n{filepath}\n\nPort: {port}\n\nFlash işlemine başlansın mı?",
+            self, "Firmware Update",
+            f"Selected file:\n{filepath}\n\nPort: {port}\n\nStart the flashing process?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
         self.btn_firmware_update.setEnabled(False)
-        self.append_log(f"[FW] Firmware yükleniyor: {filepath}")
+        self.append_log(f"[FW] Uploading firmware: {filepath}")
         self.append_log(f"[FW] Port: {port}")
 
         args = [
@@ -894,15 +894,15 @@ class DSGMainWindow(QMainWindow):
     def _firmware_flash_finished(self, exit_code, exit_status):
         self.btn_firmware_update.setEnabled(True)
         if exit_code == 0:
-            self.append_log("[FW] Firmware güncelleme tamamlandı.")
-            QMessageBox.information(self, "Tamamlandı", "Firmware başarıyla güncellendi.")
+            self.append_log("[FW] Firmware update complete.")
+            QMessageBox.information(self, "Complete", "Firmware updated successfully.")
         else:
-            self.append_log(f"[FW] Firmware güncelleme başarısız oldu (exit code: {exit_code}).")
-            QMessageBox.critical(self, "Hata", "Firmware güncelleme başarısız oldu. Detaylar için System Logs'a bakın.")
+            self.append_log(f"[FW] Firmware update failed (exit code: {exit_code}).")
+            QMessageBox.critical(self, "Error", "Firmware update failed. Check System Logs for details.")
         self.firmware_process = None
 
     def sync_ui_with_device(self, data):
-        """Cihazdan gelen JSON paketi ile arayüzdeki tüm kutuları doldurur."""
+        """Populates all UI fields using the JSON packet received from the device."""
         try:
             self.spin_freq.setValue(float(data.get("cw_freq", 1000)))
             self.combo_unit.setCurrentText(data.get("cw_unit", "MHz"))
