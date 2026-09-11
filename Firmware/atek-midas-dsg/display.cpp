@@ -1350,9 +1350,9 @@ void ApplyFrequency(double fHz) {
     }
 
     // Set PLL frequency.
-    bool lock = Lmx2820SetFreqinMHz(fMHz, 10000000 , FilterStatus);
+    bool lock = Lmx2820SetFreqinMHz(fMHz, 10000000, FilterStatus);
 
-    // Update state only.
+    // Update frequency state.
     if (fHz >= 1e9) {
         enteredFreqValue = rtrimZeros(String(fHz / 1e9, 9));
         enteredUnitValue = "GHz";
@@ -1367,12 +1367,25 @@ void ApplyFrequency(double fHz) {
         enteredUnitValue = "Hz";
     }
 
+    // Keep the main CW frequency state synchronized before recalculating power.
+    FreqValueForMainMenu = enteredFreqValue;
+    FreqUnitForMainMenu  = enteredUnitValue;
+
+    // Frequency changed -> recalculate LO power and attenuator
+    // for the currently selected target power.
+    if (AmpValueForMainMenu.length() > 0) {
+        char cmdBuf[32];
+        sprintf(cmdBuf, "POW:LEV %s", AmpValueForMainMenu.c_str());
+        RC_HandleLine(cmdBuf);
+    }
+
     // Visual update guard.
     if (currentMenu == MAIN_MENU) {
         SetFreqUnitOnMainMenu(enteredUnitValue);
         SetFreqOnMainMenu(enteredFreqValue);
     }
-    SetLock(lock); // The lock icon is in the bottom bar, so it can always be redrawn.
+
+    SetLock(lock);
 }
 
 
@@ -1457,6 +1470,14 @@ extern CalibData calibTable[];
 extern uint16_t calibCount;
 extern void Lmx2820SetOUTA_PWR(uint8_t OUTA_PWR_i);
 extern void Lmx2820SetOUTB_PWR(uint8_t OUTB_PWR_i);
+
+extern bool GetHighPowerLookupAtt(
+    double freqMHz,
+    bool filterOn,
+    float requestedPowerDBm,
+    uint8_t *attOut,
+    float *appliedPowerDBm
+);
 
 // ====================================================================
 // Main sweep function
@@ -1565,72 +1586,183 @@ void RunSweep()
       SetFilterBand(currentHz / 1e6);
   }
 
-  // ====================================================================
-  // High-speed power and attenuation control engine.
-  // ====================================================================
-  float targetDBm = AmpValueSweepForSweepMenu.toFloat();
-  uint8_t selectedLO;
-  float refPower;
+// ====================================================================
+// High-speed power and attenuation control engine.
+// ====================================================================
+float targetDBm = AmpValueSweepForSweepMenu.toFloat();
 
-  // 1. LO level selection based on the defined power-control rules.
-  if (targetDBm >= 6.0) {
-      selectedLO = 7;
-      refPower = 6.0;
-  } else if (targetDBm >= -2.0) {
-      selectedLO = 2;
-      refPower = 3.0;
-  } else {
-      selectedLO = 0;
-      refPower = -3.0;
-  }
+uint8_t selectedLO = 0;
+float finalAtt = 31.0;
 
-  Lmx2820SetOUTA_PWR(selectedLO);
-  Lmx2820SetOUTB_PWR(selectedLO);
 
-  // 2. Read calibration values from RAM and interpolate.
-  uint16_t freqMHz = (uint16_t)(currentHz / 1e6);
-  float finalAtt = 31.0; 
+// ----------------------------------------------------------
+// Decide which calibration engine must be used.
+//
+// Filter ON  -> High Power LUT from 8 dBm and above
+// Filter OFF -> High Power LUT from 13 dBm and above
+// ----------------------------------------------------------
+bool useHighPowerTable =
+    (FilterStatus && targetDBm >= 8.0f) ||
+    (!FilterStatus && targetDBm >= 13.0f);
 
-  if (calibCount > 0) {
-      int idx_low = 0;
-      int idx_high = calibCount - 1;
-      
-      for(int i = 0; i < calibCount - 1; i++) {
-          if(freqMHz >= calibTable[i].freq_MHz && freqMHz <= calibTable[i+1].freq_MHz) {
-              idx_low = i;
-              idx_high = i + 1;
-              break;
-          }
-      }
 
-      auto getAtt = [&](int idx) -> float {
-          float val = 31.0;
-          if(refPower == 6.0) val = FilterStatus ? calibTable[idx].att6_on : calibTable[idx].att6_off;
-          else if(refPower == 3.0) val = FilterStatus ? calibTable[idx].att3_on : calibTable[idx].att3_off;
-          else val = FilterStatus ? calibTable[idx].att_n3_on : calibTable[idx].att_n3_off;
-          return (val < 0) ? 31.0 : val;
-      };
+ if (useHighPowerTable)
+ {
+    // ======================================================
+    // HIGH POWER LOOKUP TABLE
+    // ======================================================
 
-      float att_low = getAtt(idx_low);
-      float att_high = getAtt(idx_high);
+    uint8_t selectedAtt = 31;
+    float appliedPowerDBm = 0.0f;
 
-      float baseAtt = att_low;
-      if (calibTable[idx_high].freq_MHz != calibTable[idx_low].freq_MHz) {
-          float ratio = (float)(freqMHz - calibTable[idx_low].freq_MHz) / (calibTable[idx_high].freq_MHz - calibTable[idx_low].freq_MHz);
-          baseAtt = att_low + ratio * (att_high - att_low);
-      }
+    bool found = GetHighPowerLookupAtt(
+        currentHz / 1e6,
+        FilterStatus,
+        targetDBm,
+        &selectedAtt,
+        &appliedPowerDBm
+    );
 
-      // 3. Apply the target power difference.
-      float powerDiff = targetDBm - refPower; 
-      finalAtt = baseAtt - powerDiff;
-  }
+    // High Power calibration always uses LO = 7.
+    selectedLO = 7;
 
-  // 4. Clamp the attenuation value and apply it to the hardware.
-  if (finalAtt < 0.0) finalAtt = 0.0;
-  if (finalAtt > 31.5) finalAtt = 31.5;
-  finalAtt = (int)finalAtt; 
-  
-  SetAttenuator((uint8_t)finalAtt); 
+    Lmx2820SetOUTA_PWR(selectedLO);
+    Lmx2820SetOUTB_PWR(selectedLO);
+
+    if (found)
+    {
+        // ATT comes directly from the High Power LUT.
+        finalAtt = selectedAtt;
+    }
+    else
+    {
+        // Safety fallback:
+        // If no valid High Power value exists at all,
+        // use maximum attenuation.
+        finalAtt = 31.0;
+    }
+
+    SetAttenuator((uint8_t)finalAtt);
+ }
+ else
+ {
+    // ======================================================
+    // NORMAL CALIBRATION
+    // Existing DSG power-control logic remains unchanged.
+    // ======================================================
+
+    float refPower;
+
+    // 1. LO level selection based on the defined power-control rules.
+    if (targetDBm >= 6.0) {
+        selectedLO = 7;
+        refPower = 6.0;
+    }
+    else if (targetDBm >= -2.0) {
+        selectedLO = 2;
+        refPower = 3.0;
+    }
+    else {
+        selectedLO = 0;
+        refPower = -3.0;
+    }
+
+    Lmx2820SetOUTA_PWR(selectedLO);
+    Lmx2820SetOUTB_PWR(selectedLO);
+
+
+    // 2. Read calibration values from RAM and interpolate.
+    uint16_t freqMHz = (uint16_t)(currentHz / 1e6);
+
+    if (calibCount > 0)
+    {
+        int idx_low = 0;
+        int idx_high = calibCount - 1;
+
+        for (int i = 0; i < calibCount - 1; i++)
+        {
+            if (
+                freqMHz >= calibTable[i].freq_MHz &&
+                freqMHz <= calibTable[i + 1].freq_MHz
+            )
+            {
+                idx_low = i;
+                idx_high = i + 1;
+                break;
+            }
+        }
+
+
+        auto getAtt = [&](int idx) -> float
+        {
+            float val = 31.0;
+
+            if (refPower == 6.0)
+                val = FilterStatus
+                    ? calibTable[idx].att6_on
+                    : calibTable[idx].att6_off;
+
+            else if (refPower == 3.0)
+                val = FilterStatus
+                    ? calibTable[idx].att3_on
+                    : calibTable[idx].att3_off;
+
+            else
+                val = FilterStatus
+                    ? calibTable[idx].att_n3_on
+                    : calibTable[idx].att_n3_off;
+
+            return (val < 0) ? 31.0 : val;
+        };
+
+
+        float att_low = getAtt(idx_low);
+        float att_high = getAtt(idx_high);
+
+        float baseAtt = att_low;
+
+        if (
+            calibTable[idx_high].freq_MHz !=
+            calibTable[idx_low].freq_MHz
+        )
+        {
+            float ratio =
+                (float)(
+                    freqMHz -
+                    calibTable[idx_low].freq_MHz
+                )
+                /
+                (
+                    calibTable[idx_high].freq_MHz -
+                    calibTable[idx_low].freq_MHz
+                );
+
+            baseAtt =
+                att_low +
+                ratio * (att_high - att_low);
+        }
+
+
+        // 3. Apply target-power difference.
+        float powerDiff =
+            targetDBm - refPower;
+
+        finalAtt =
+            baseAtt - powerDiff;
+    }
+
+
+    // 4. Clamp and apply normal-calibration attenuation.
+    if (finalAtt < 0.0)
+        finalAtt = 0.0;
+
+    if (finalAtt > 31.5)
+        finalAtt = 31.5;
+
+    finalAtt = (int)finalAtt;
+
+    SetAttenuator((uint8_t)finalAtt);
+ }
   // ====================================================================
 
   // --- Log current sweep step ---

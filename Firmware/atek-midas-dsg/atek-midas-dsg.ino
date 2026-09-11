@@ -142,6 +142,299 @@ bool AddCalibrationPoint(uint16_t f, int8_t a1, int8_t a2, int8_t a3, int8_t a4,
     calibCount++;
     return true;
 }
+
+// ==============================================================
+//  HIGH POWER CALIBRATION DATA
+//  Separate lookup table for high-power operation.
+// ==============================================================
+
+struct HighPowerCalibData {
+    uint16_t freq_MHz;
+
+    // Filter ON lookup table
+    int8_t att8_on;
+    int8_t att9_on;
+    int8_t att10_on;
+    int8_t att11_on;
+    int8_t att12_on;
+
+    // Filter OFF lookup table
+    int8_t att13_off;
+    int8_t att14_off;
+    int8_t att15_off;
+    int8_t att16_off;
+    int8_t att17_off;
+    int8_t att18_off;
+};
+
+#define MAX_HIGHPOWER_CALIB_POINTS 300
+
+HighPowerCalibData highPowerCalibTable[MAX_HIGHPOWER_CALIB_POINTS];
+uint16_t highPowerCalibCount = 0;
+
+
+// Load High Power calibration table from its own NVS namespace.
+void InitHighPowerCalibrationData()
+{
+    preferences.begin("hpcalib", false);
+
+    highPowerCalibCount = preferences.getUShort("count", 0);
+
+    if (highPowerCalibCount > 0 &&
+        highPowerCalibCount <= MAX_HIGHPOWER_CALIB_POINTS)
+    {
+        size_t dataLen =
+            highPowerCalibCount * sizeof(HighPowerCalibData);
+
+        size_t readLen =
+            preferences.getBytes(
+                "data",
+                highPowerCalibTable,
+                dataLen
+            );
+
+        if (readLen != dataLen)
+        {
+            highPowerCalibCount = 0;
+        }
+        else
+        {
+            Serial.print("[NVS] Loaded High Power calibration points: ");
+            Serial.println(highPowerCalibCount);
+        }
+    }
+    else if (highPowerCalibCount > MAX_HIGHPOWER_CALIB_POINTS)
+    {
+        highPowerCalibCount = 0;
+    }
+
+    preferences.end();
+}
+
+
+// Save High Power calibration table to its own NVS namespace.
+void SaveHighPowerCalibrationToNVS()
+{
+    preferences.begin("hpcalib", false);
+
+    preferences.putUShort(
+        "count",
+        highPowerCalibCount
+    );
+
+    preferences.putBytes(
+        "data",
+        highPowerCalibTable,
+        highPowerCalibCount * sizeof(HighPowerCalibData)
+    );
+
+    preferences.end();
+
+    Serial.println(
+        "[NVS] High Power calibration saved."
+    );
+}
+
+
+// Clear only the High Power calibration table in RAM.
+void ClearHighPowerCalibrationRAM()
+{
+    highPowerCalibCount = 0;
+
+    memset(
+        highPowerCalibTable,
+        0,
+        sizeof(highPowerCalibTable)
+    );
+}
+
+
+// Add one High Power calibration frequency row to RAM.
+bool AddHighPowerCalibrationPoint(
+    uint16_t f,
+
+    int8_t att8_on,
+    int8_t att9_on,
+    int8_t att10_on,
+    int8_t att11_on,
+    int8_t att12_on,
+
+    int8_t att13_off,
+    int8_t att14_off,
+    int8_t att15_off,
+    int8_t att16_off,
+    int8_t att17_off,
+    int8_t att18_off
+)
+{
+    if (highPowerCalibCount >= MAX_HIGHPOWER_CALIB_POINTS)
+        return false;
+
+    HighPowerCalibData &p =
+        highPowerCalibTable[highPowerCalibCount];
+
+    p.freq_MHz = f;
+
+    p.att8_on  = att8_on;
+    p.att9_on  = att9_on;
+    p.att10_on = att10_on;
+    p.att11_on = att11_on;
+    p.att12_on = att12_on;
+
+    p.att13_off = att13_off;
+    p.att14_off = att14_off;
+    p.att15_off = att15_off;
+    p.att16_off = att16_off;
+    p.att17_off = att17_off;
+    p.att18_off = att18_off;
+
+    highPowerCalibCount++;
+
+    return true;
+}
+
+// ==============================================================
+// HIGH POWER LOOKUP TABLE SEARCH
+//
+// Finds the nearest frequency row.
+// If two rows are equally close, the higher frequency is selected.
+//
+// Filter ON:
+//   8 ... 12 dBm
+//
+// Filter OFF:
+//   13 ... 18 dBm
+//
+// If the requested target is unavailable (-1), the function
+// searches downward and uses the highest available power level.
+// ==============================================================
+bool GetHighPowerLookupAtt(
+    double freqMHz,
+    bool filterOn,
+    float requestedPowerDBm,
+    uint8_t *attOut,
+    float *appliedPowerDBm
+)
+{
+    if (highPowerCalibCount == 0 || attOut == nullptr)
+        return false;
+
+    // ----------------------------------------------------------
+    // 1. Find nearest frequency row.
+    //    Equal distance -> higher frequency wins.
+    // ----------------------------------------------------------
+    int bestIndex = 0;
+
+    double bestDiff =
+        fabs(freqMHz - highPowerCalibTable[0].freq_MHz);
+
+    for (int i = 1; i < highPowerCalibCount; i++)
+    {
+        double diff =
+            fabs(freqMHz - highPowerCalibTable[i].freq_MHz);
+
+        if (
+            diff < bestDiff ||
+            (
+                fabs(diff - bestDiff) < 0.0001 &&
+                highPowerCalibTable[i].freq_MHz >
+                highPowerCalibTable[bestIndex].freq_MHz
+            )
+        )
+        {
+            bestDiff = diff;
+            bestIndex = i;
+        }
+    }
+
+    HighPowerCalibData &row =
+        highPowerCalibTable[bestIndex];
+
+
+    // ----------------------------------------------------------
+    // 2. Convert requested power to the nearest integer dBm.
+    //    x.5 is rounded upward.
+    // ----------------------------------------------------------
+    int requestedLevel =
+        (int)floor(requestedPowerDBm + 0.5f);
+
+
+    // ----------------------------------------------------------
+    // 3. FILTER ON
+    // ----------------------------------------------------------
+    if (filterOn)
+    {
+        if (requestedLevel > 12)
+            requestedLevel = 12;
+
+        if (requestedLevel < 8)
+            requestedLevel = 8;
+
+        for (int power = requestedLevel; power >= 8; power--)
+        {
+            int att = -1;
+
+            switch (power)
+            {
+                case 12: att = row.att12_on; break;
+                case 11: att = row.att11_on; break;
+                case 10: att = row.att10_on; break;
+                case 9:  att = row.att9_on;  break;
+                case 8:  att = row.att8_on;  break;
+            }
+
+            if (att >= 0)
+            {
+                *attOut = (uint8_t)att;
+
+                if (appliedPowerDBm != nullptr)
+                    *appliedPowerDBm = (float)power;
+
+                return true;
+            }
+        }
+    }
+
+    // ----------------------------------------------------------
+    // 4. FILTER OFF
+    // ----------------------------------------------------------
+    else
+    {
+        if (requestedLevel > 18)
+            requestedLevel = 18;
+
+        if (requestedLevel < 13)
+            requestedLevel = 13;
+
+        for (int power = requestedLevel; power >= 13; power--)
+        {
+            int att = -1;
+
+            switch (power)
+            {
+                case 18: att = row.att18_off; break;
+                case 17: att = row.att17_off; break;
+                case 16: att = row.att16_off; break;
+                case 15: att = row.att15_off; break;
+                case 14: att = row.att14_off; break;
+                case 13: att = row.att13_off; break;
+            }
+
+            if (att >= 0)
+            {
+                *attOut = (uint8_t)att;
+
+                if (appliedPowerDBm != nullptr)
+                    *appliedPowerDBm = (float)power;
+
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 // ==============================================================
 
 // --------------------------------------------------------------
@@ -271,6 +564,7 @@ void setup() {
   Serial.begin(115200);
   // Load the calibration table from non-volatile storage (NVS) during startup
   InitCalibrationData();
+  InitHighPowerCalibrationData();
   Serial.println("Starting...");
 
   RC_Begin();

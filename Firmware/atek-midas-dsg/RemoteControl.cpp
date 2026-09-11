@@ -143,6 +143,34 @@ extern void ClearCalibrationRAM();
 extern void SaveCalibrationToNVS();
 extern bool AddCalibrationPoint(uint16_t f, int8_t a1, int8_t a2, int8_t a3, int8_t a4, int8_t a5, int8_t a6);
 
+// --- HIGH POWER CALIBRATION LINKS ---
+extern void ClearHighPowerCalibrationRAM();
+extern void SaveHighPowerCalibrationToNVS();
+
+extern bool AddHighPowerCalibrationPoint(
+    uint16_t f,
+
+    int8_t att8_on,
+    int8_t att9_on,
+    int8_t att10_on,
+    int8_t att11_on,
+    int8_t att12_on,
+
+    int8_t att13_off,
+    int8_t att14_off,
+    int8_t att15_off,
+    int8_t att16_off,
+    int8_t att17_off,
+    int8_t att18_off
+);
+
+extern bool GetHighPowerLookupAtt(
+    double freqMHz,
+    bool filterOn,
+    float requestedPowerDBm,
+    uint8_t *attOut,
+    float *appliedPowerDBm
+);
 // Access to the device's own display-state variables
 extern String AmpValueForMainMenu;
 extern String enteredAmpValue;
@@ -170,10 +198,17 @@ static void h_io_write (char*, int);
 static void h_io_read  (char*, int);
 static void h_adc_read (char*, int);
 static void h_pow_lev(char*, int);
+
 static void h_cal_clear(char*, int);
 static void h_cal_data(char*, int);
 static void h_cal_save(char*, int);
 static void h_cal_serial(char*, int);
+
+// High Power calibration
+static void h_hpcal_clear(char*, int);
+static void h_hpcal_data(char*, int);
+static void h_hpcal_save(char*, int);
+
 static void h_sync(char*, int);
 
 // --- DISPLAY CONTROL COMMAND ---
@@ -230,12 +265,20 @@ static const scpi_cmd_t scpi_table[] = {
   
   // --- CUSTOM POWER AND CALIBRATION COMMANDS (WITHOUT A LEADING ':') ---
   { "POW:LEV",       h_pow_lev     },
-  { "SWEEP:POW:LEV", h_pow_lev     }, // Route the Sweep screen power setting to the same power-control handler
+  { "SWEEP:POW:LEV", h_pow_lev     },
+
+  // Normal calibration
   { "CAL:CLEAR",     h_cal_clear   },
-  { "CAL:SER",   h_cal_serial },
+  { "CAL:SER",       h_cal_serial  },
   { "CAL:DATA",      h_cal_data    },
   { "CAL:SAVE",      h_cal_save    },
-  { "SYNC",          h_sync        }  // Synchronization command
+
+  // High Power calibration
+  { "HPCAL:CLEAR",   h_hpcal_clear },
+  { "HPCAL:DATA",    h_hpcal_data  },
+  { "HPCAL:SAVE",    h_hpcal_save  },
+
+  { "SYNC",          h_sync        }
 };
 
 static const size_t scpi_count = sizeof(scpi_table)/sizeof(scpi_table[0]);
@@ -299,12 +342,9 @@ static int g_filter_cached = -1;  // -1: unknown, 0/1: OFF/ON
 
 static void h_filt(char *args, int q) {
   if (q) {
-    if (g_filter_cached >= 0) {
-      rc_writeln(g_filter_cached ? "1" : "0");
-    } else {
-      rc_writeln("-303,No cached value");
-    }
-    return;
+   extern bool FilterStatus;
+   rc_writeln(FilterStatus ? "1" : "0");
+   return;
   }
 
   if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
@@ -459,7 +499,28 @@ static void h_out_a_and_b_pwr(char *args, int q) {
 }
 
 static void h_freq(char *args, int q) {
-  if (q) { rc_writeln("0"); return; }
+  if (q) {
+   extern String FreqValueForMainMenu;
+   extern String FreqUnitForMainMenu;
+
+   double hz = FreqValueForMainMenu.toDouble();
+
+   if (FreqUnitForMainMenu == "GHz") {
+    hz *= 1e9;
+   }
+   else if (FreqUnitForMainMenu == "MHz") {
+    hz *= 1e6;
+   }
+   else if (FreqUnitForMainMenu == "KHz") {
+    hz *= 1e3;
+   }
+
+   char out[32];
+   snprintf(out, sizeof(out), "%.0f", hz);
+   rc_writeln(out);
+   return;
+  }
+  
   if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
 
   int ok = 0;
@@ -509,8 +570,128 @@ static void h_pow_att(char *args, int q) {
 
 // --- SYNCHRONIZED LINEAR POWER-CONTROL ENGINE ---
 static void h_pow_lev(char *args, int q) {
-  if (q) { rc_writeln("0"); return; }
-  float targetDBm = atof(args);
+  if (q) {
+   rc_writeln(AmpValueForMainMenu.c_str());
+   return;
+  }
+
+  // Parameter must exist.
+  if (!args || !*args) {
+    rc_writeln("-109,Missing parameter");
+    return;
+  }
+
+  // Convert the parameter and make sure the complete argument is numeric.
+  char *endPtr = nullptr;
+  float targetDBm = strtof(args, &endPtr);
+
+  if (endPtr == args || *endPtr != '\0') {
+    rc_writeln("-104,Data type error");
+    return;
+  }
+
+  // Valid DSG RF power range.
+  if (targetDBm < -30.0f || targetDBm > 31.0f) {
+    rc_writeln("-222,Data out of range");
+    return;
+  }
+
+  // ============================================================================
+ // HIGH POWER LOOKUP TABLE MODE
+ //
+ // Filter ON  -> target >= 8 dBm
+ // Filter OFF -> target >= 13 dBm
+ //
+ // High Power mode always uses LO = 7.
+ // ATT is read directly from the second calibration lookup table.
+ // ============================================================================
+ extern bool FilterStatus;
+
+ bool useHighPowerTable =
+    (FilterStatus && targetDBm >= 8.0f) ||
+    (!FilterStatus && targetDBm >= 13.0f);
+
+ if (useHighPowerTable)
+ {
+    // ----------------------------------------------------------
+    // Read currently active CW frequency.
+    // ----------------------------------------------------------
+    extern String FreqValueForMainMenu;
+    extern String FreqUnitForMainMenu;
+
+    double activeFreqHz =
+        FreqValueForMainMenu.toDouble();
+
+    if (FreqUnitForMainMenu == "GHz")
+        activeFreqHz *= 1e9;
+    else if (FreqUnitForMainMenu == "MHz")
+        activeFreqHz *= 1e6;
+    else if (FreqUnitForMainMenu == "KHz")
+        activeFreqHz *= 1e3;
+
+    double activeFreqMHz =
+        activeFreqHz / 1e6;
+
+
+    // ----------------------------------------------------------
+    // Find ATT from High Power LUT.
+    // ----------------------------------------------------------
+    uint8_t selectedAtt = 31;
+    float appliedPowerDBm = 0.0f;
+
+    bool found = GetHighPowerLookupAtt(
+        activeFreqMHz,
+        FilterStatus,
+        targetDBm,
+        &selectedAtt,
+        &appliedPowerDBm
+    );
+
+    if (!found)
+    {
+        rc_writeln("-224,High power calibration unavailable");
+        return;
+    }
+
+
+    // ----------------------------------------------------------
+    // High Power mode always uses LO = 7.
+    // ----------------------------------------------------------
+    Lmx2820SetOUTA_PWR(7);
+    Lmx2820SetOUTB_PWR(7);
+
+    // ATT comes directly from the lookup table.
+    SetAttenuator(selectedAtt);
+
+
+    // ----------------------------------------------------------
+    // Keep the USER REQUESTED target in the state.
+    //
+    // Example:
+    // User requests 12 dBm but this frequency supports only 8 dBm.
+    // Hardware applies the 8 dBm LUT value, but requested target
+    // remains 12 dBm. If the user later changes to a frequency
+    // where 12 dBm is available, ApplyFrequency() will automatically
+    // try 12 dBm again.
+    // ----------------------------------------------------------
+    String targetStr =
+        (targetDBm == 0.0f)
+        ? "0"
+        : String(targetDBm, 1);
+
+    AmpValueForMainMenu = targetStr;
+    enteredAmpValue = targetStr;
+    currentAmplitude = targetStr;
+
+    if (currentMenu == MAIN_MENU)
+    {
+        SetAmpUnitOnMainMenu();
+        SetAmpOnMainMenu(targetStr);
+    }
+
+    rc_writeln("0");
+    return;
+  }
 
   // 1. Select the LO power level and matching calibration reference column
   uint8_t selectedLO;
@@ -653,10 +834,34 @@ static void h_cal_serial(char *args, int q) {
     rc_writeln("0");
 }
 
-static void h_cal_clear(char *args, int q) { ClearCalibrationRAM(); rc_writeln("0"); }
-static void h_cal_save(char *args, int q) { SaveCalibrationToNVS(); rc_writeln("0"); }
+static void h_cal_clear(char *args, int q) {
+  if (q) {
+    rc_writeln("-109,Query not supported");
+    return;
+  }
+
+  ClearCalibrationRAM();
+  rc_writeln("0");
+}
+
+static void h_cal_save(char *args, int q) {
+  if (q) {
+    rc_writeln("-109,Query not supported");
+    return;
+  }
+
+  SaveCalibrationToNVS();
+  rc_writeln("0");
+}
 static void h_cal_data(char *args, int q) {
+
+  if (!args || !*args) {
+    rc_writeln("-109,Missing parameter");
+    return;
+  }
+
   int f, a1, a2, a3, a4, a5, a6;
+
   if(sscanf(args, "%d,%d,%d,%d,%d,%d,%d", &f, &a1, &a2, &a3, &a4, &a5, &a6) == 7) {
     if(AddCalibrationPoint(f, a1, a2, a3, a4, a5, a6)) rc_writeln("0");
     else rc_writeln("-223,RAM Full");
@@ -665,12 +870,153 @@ static void h_cal_data(char *args, int q) {
   }
 }
 
+// ============================================================================
+// HIGH POWER CALIBRATION MANAGEMENT
+// ============================================================================
+
+static void h_hpcal_clear(char *args, int q)
+{
+    if (q) {
+        rc_writeln("-109,Query not supported");
+        return;
+    }
+
+    ClearHighPowerCalibrationRAM();
+    rc_writeln("0");
+}
+
+
+static void h_hpcal_save(char *args, int q)
+{
+    if (q) {
+        rc_writeln("-109,Query not supported");
+        return;
+    }
+
+    SaveHighPowerCalibrationToNVS();
+    rc_writeln("0");
+}
+
+
+static void h_hpcal_data(char *args, int q)
+{
+    if (q) {
+        rc_writeln("-109,Query not supported");
+        return;
+    }
+
+    if (!args || !*args) {
+        rc_writeln("-109,Missing parameter");
+        return;
+    }
+
+    int freq;
+
+    int att8_on;
+    int att9_on;
+    int att10_on;
+    int att11_on;
+    int att12_on;
+
+    int att13_off;
+    int att14_off;
+    int att15_off;
+    int att16_off;
+    int att17_off;
+    int att18_off;
+
+    int parsed = sscanf(
+        args,
+        "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+
+        &freq,
+
+        &att8_on,
+        &att9_on,
+        &att10_on,
+        &att11_on,
+        &att12_on,
+
+        &att13_off,
+        &att14_off,
+        &att15_off,
+        &att16_off,
+        &att17_off,
+        &att18_off
+    );
+
+    if (parsed != 12) {
+        rc_writeln("-109,Format Error");
+        return;
+    }
+
+    // Valid device frequency range in MHz.
+    if (freq < 150 || freq > 22600) {
+        rc_writeln("-222,Frequency out of range");
+        return;
+    }
+
+    // -1 means that target power is intentionally unavailable
+    // at this frequency. Otherwise ATT must be 0..31.
+    int attValues[] = {
+        att8_on,
+        att9_on,
+        att10_on,
+        att11_on,
+        att12_on,
+
+        att13_off,
+        att14_off,
+        att15_off,
+        att16_off,
+        att17_off,
+        att18_off
+    };
+
+    for (int i = 0; i < 11; i++) {
+        if (attValues[i] < -1 || attValues[i] > 31) {
+            rc_writeln("-222,ATT value out of range");
+            return;
+        }
+    }
+
+    if (
+        AddHighPowerCalibrationPoint(
+            freq,
+
+            att8_on,
+            att9_on,
+            att10_on,
+            att11_on,
+            att12_on,
+
+            att13_off,
+            att14_off,
+            att15_off,
+            att16_off,
+            att17_off,
+            att18_off
+        )
+    ) {
+        rc_writeln("0");
+    }
+    else {
+        rc_writeln("-223,High Power calibration RAM full");
+    }
+}
+
 static void h_outp(char *args, int q) {
-  if (q) { rc_writeln("0"); return; }
+
+  if (q) {
+    extern bool rfOutputEnabled;
+    rc_writeln(rfOutputEnabled ? "1" : "0");
+    return;
+  }
+
   if (!args || !*args){ rc_writeln("-109,Missing parameter"); return; }
   int ok=0; int on = parse_onoff(args, &ok);
   if (!ok)            { rc_writeln("-104,Data type error");   return; }
-  
+
   SetRfOnOff(on ? true : false);
   rc_writeln(on ? "1" : "0");
 }
@@ -795,7 +1141,25 @@ static void h_disp_menu(char *args, int q) {
 // =======================================================
 
 static void h_sweep_start(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+
+    if (q) {
+     double hz = StartValueForSweepMenu.toDouble();
+
+     if (StartUnitForSweepMenu == "GHz") {
+        hz *= 1e9;
+      }
+     else if (StartUnitForSweepMenu == "MHz") {
+        hz *= 1e6;
+      }
+     else if (StartUnitForSweepMenu == "KHz") {
+        hz *= 1e3;
+      }
+
+     char out[32];
+     snprintf(out, sizeof(out), "%.0f", hz);
+     rc_writeln(out);
+     return;
+    }
 
     int ok=0;
     double hz = parse_freq_to_hz(args, &ok);
@@ -821,7 +1185,24 @@ static void h_sweep_start(char *args, int q) {
 }
 
 static void h_sweep_stop(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     double hz = StopValueForSweepMenu.toDouble();
+
+     if (StopUnitForSweepMenu == "GHz") {
+        hz *= 1e9;
+      }
+     else if (StopUnitForSweepMenu == "MHz") {
+        hz *= 1e6;
+      }
+     else if (StopUnitForSweepMenu == "KHz") {
+        hz *= 1e3;
+      }
+
+     char out[32];
+     snprintf(out, sizeof(out), "%.0f", hz);
+     rc_writeln(out);
+     return;
+    } 
 
     int ok=0;
     double hz = parse_freq_to_hz(args, &ok);
@@ -848,7 +1229,25 @@ static void h_sweep_stop(char *args, int q) {
 }
 
 static void h_sweep_step(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     double hz = StepValueForSweepMenu.toDouble();
+
+     if (StepUnitForSweepMenu == "GHz") {
+        hz *= 1e9;
+      }
+     else if (StepUnitForSweepMenu == "MHz") {
+        hz *= 1e6;
+      }
+     else if (StepUnitForSweepMenu == "KHz") {
+        hz *= 1e3;
+      }
+
+     char out[32];
+     snprintf(out, sizeof(out), "%.0f", hz);
+     rc_writeln(out);
+     return;
+    }
+
     int ok=0; double hz = parse_freq_to_hz(args, &ok);
     if (!ok || hz<=0) { rc_writeln("-104,Data type error"); return; }
     StepValueForSweepMenu = format_mhz(hz);
@@ -860,7 +1259,11 @@ static void h_sweep_step(char *args, int q) {
 }
 
 static void h_sweep_dwell(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     rc_writeln(DwellValueForSweepMenu.c_str());
+     return;
+    }
+
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
     char *endp = nullptr;
     double ms = strtod(args, &endp);
@@ -876,7 +1279,11 @@ static void h_sweep_dwell(char *args, int q) {
 // 0 (the default) means "run forever", matching the sweep's original
 // (unlimited) behavior.
 static void h_sweep_count(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     rc_writeln(CountValueForSweepMenu.c_str());
+     return;
+    }
+
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
     char *endp = nullptr;
     long count = strtol(args, &endp, 10);
@@ -889,7 +1296,10 @@ static void h_sweep_count(char *args, int q) {
 }
 
 static void h_sweep_pow(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     rc_writeln(AmpValueSweepForSweepMenu.c_str());
+     return;
+    }
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
     
     char *endp = nullptr;
@@ -906,7 +1316,10 @@ static void h_sweep_pow(char *args, int q) {
 }
 
 static void h_sweep_type(char *args, int q) {
-    if (q) { rc_writeln("0"); return; }
+    if (q) {
+     rc_writeln(StepTypeValueForSweepMenu.c_str());
+     return;
+    }
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
     char u[16]={0};
     for (int i=0; args[i] && i<15; ++i) u[i] = (char)toupper((unsigned char)args[i]);

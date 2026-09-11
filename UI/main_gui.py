@@ -799,98 +799,340 @@ class DSGMainWindow(QMainWindow):
     # small paced batches to avoid overloading the serial communication buffer.
     # -------------------------------------------------------------------------
     def load_calibration_csv(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select Calibration CSV File", "",
-                                                  "CSV Files (*.csv);;All Files (*)")
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Calibration CSV File",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+
         if not filepath:
             return
 
-        # Calibration file name must start with SN_XXX_
-        # Example: SN_002_Calib_Optimized_FILT_F.csv
         filename = os.path.basename(filepath)
-        serial_match = re.match(r"^(SN_\d{3})_", filename, re.IGNORECASE)
+
+        # ---------------------------------------------------------
+        # File name must start with SN_XXX_
+        # ---------------------------------------------------------
+        serial_match = re.match(
+            r"^(SN_\d{3})_",
+            filename,
+            re.IGNORECASE
+        )
 
         if not serial_match:
             QMessageBox.warning(
                 self,
                 "Invalid Calibration File Name",
                 "Calibration file name must start with SN_XXX_ format.\n\n"
-                "Example: SN_002_Calib_Optimized_FILT_F.csv"
+                "Examples:\n"
+                "SN_010_Calib_Optimized_FILT_T-F.csv\n"
+                "SN_010_HighPowerCalib_FILT_T-F.csv"
             )
-            self.append_log(f"[ERR] Invalid calibration file name: {filename}")
+
+            self.append_log(
+                f"[ERR] Invalid calibration file name: {filename}"
+            )
             return
 
         device_serial = serial_match.group(1).upper()
+        filename_lower = filename.lower()
+
+        # ---------------------------------------------------------
+        # Decide calibration type from FILE NAME.
+        # ---------------------------------------------------------
+        if "highpowercalib" in filename_lower:
+            calibration_type = "HIGH_POWER"
+
+        elif "calib_optimized" in filename_lower:
+            calibration_type = "NORMAL"
+
+        else:
+            QMessageBox.warning(
+                self,
+                "Unknown Calibration Type",
+                "Calibration file type could not be identified from the file name.\n\n"
+                "Expected names containing:\n"
+                "Calib_Optimized\n"
+                "or\n"
+                "HighPowerCalib"
+            )
+
+            self.append_log(
+                f"[ERR] Unknown calibration file type: {filename}"
+            )
+            return
 
         try:
-            with open(filepath, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            with open(
+                filepath,
+                'r',
+                encoding='utf-8-sig',
+                errors='ignore'
+            ) as f:
                 lines = f.readlines()
 
             if len(lines) < 2:
-                self.append_log("[ERR] CSV file is empty or invalid!")
+                self.append_log(
+                    "[ERR] CSV file is empty or invalid!"
+                )
                 return
 
-            self.append_log(f"[CAL] Device Serial Number: {device_serial}")
-            self.append_log("[CAL] Reading calibration data...")
+            self.append_log(
+                f"[CAL] Device Serial Number: {device_serial}"
+            )
 
-            self.worker.send_cmd(f":CAL:SER {device_serial}")
-            self.worker.send_cmd(":CAL:CLEAR")
+            # =====================================================
+            # NORMAL CALIBRATION
+            # =====================================================
+            if calibration_type == "NORMAL":
 
-            success_count = 0
-            for i in range(1, len(lines)):
-                line = lines[i].strip()
-                if not line: continue
+                self.append_log(
+                    "[CAL] Loading NORMAL calibration..."
+                )
 
-                cols = line.split(';')
-                if len(cols) < 18:
-                    continue
+                self.worker.send_cmd(
+                    f":CAL:SER {device_serial}"
+                )
 
-                try:
-                    freq = int(float(cols[0].strip().replace(',', '.')))
+                self.worker.send_cmd(
+                    ":CAL:CLEAR"
+                )
 
-                    def parse_val(val_str, is_filton):
-                        v = val_str.strip().replace(',', '.')
-                        if not v or v.lower() == 'nan': return -1
-                        try:
-                            val_float = float(v)
-                            if is_filton and not (2000 <= freq <= 18000):
+                success_count = 0
+
+                for i in range(1, len(lines)):
+
+                    line = lines[i].strip()
+
+                    if not line:
+                        continue
+
+                    cols = line.split(';')
+
+                    # Existing normal calibration CSV requires
+                    # at least 18 columns.
+                    if len(cols) < 18:
+                        continue
+
+                    try:
+                        freq = int(
+                            float(
+                                cols[0]
+                                .strip()
+                                .replace(',', '.')
+                            )
+                        )
+
+                        def parse_normal_val(val_str, is_filton):
+                            v = (
+                                val_str
+                                .strip()
+                                .replace(',', '.')
+                            )
+
+                            if not v or v.lower() == 'nan':
                                 return -1
-                            return int(round(val_float))
-                        except ValueError:
-                            return -1
 
-                    att6_on = parse_val(cols[1], True)
-                    att3_on = parse_val(cols[3], True)
-                    attn3_on = parse_val(cols[5], True)
+                            try:
+                                val_float = float(v)
 
-                    att6_off = parse_val(cols[13], False)
-                    att3_off = parse_val(cols[15], False)
-                    attn3_off = parse_val(cols[17], False)
+                                if (
+                                    is_filton and
+                                    not (2000 <= freq <= 18000)
+                                ):
+                                    return -1
 
-                    cmd = f":CAL:DATA {freq},{att6_on},{att3_on},{attn3_on},{att6_off},{att3_off},{attn3_off}"
-                    self.worker.send_cmd(cmd)
+                                return int(round(val_float))
 
-                    # --- SERIAL BUFFER PROTECTION DELAY ---
-                    # Add a short pause every 10 rows to prevent the serial port buffer from being overloaded.
-                    # This helps protect the device RAM and serial communication queue during bulk transfer.
-                    if i % 10 == 0:
-                        time.sleep(0.05)
+                            except ValueError:
+                                return -1
 
-                    success_count += 1
-                except Exception as e:
-                    continue
+                        att6_on = parse_normal_val(cols[1], True)
+                        att3_on = parse_normal_val(cols[3], True)
+                        attn3_on = parse_normal_val(cols[5], True)
 
-            # Send the final save command after all calibration rows are transferred.
-            time.sleep(0.1)  # Final short delay before saving calibration data.
-            self.worker.send_cmd(":CAL:SAVE")
+                        att6_off = parse_normal_val(cols[13], False)
+                        att3_off = parse_normal_val(cols[15], False)
+                        attn3_off = parse_normal_val(cols[17], False)
 
-            self.append_log(f"[CAL] Transfer Complete! {success_count} rows uploaded to device in total.")
-            QMessageBox.information(self, "Upload Complete",
-                                    f"Device Serial Number: {device_serial}\n\n"
-                                    f"A total of {success_count} frequency points were transferred to the device.\n"
-                                    f"The device has saved this data to its persistent memory.")
+                        cmd = (
+                            f":CAL:DATA "
+                            f"{freq},"
+                            f"{att6_on},"
+                            f"{att3_on},"
+                            f"{attn3_on},"
+                            f"{att6_off},"
+                            f"{att3_off},"
+                            f"{attn3_off}"
+                        )
+
+                        self.worker.send_cmd(cmd)
+
+                        # --- SERIAL BUFFER PROTECTION DELAY ---
+                        if i % 10 == 0:
+                            time.sleep(0.05)
+
+                        success_count += 1
+
+                    except Exception:
+                        continue
+
+                time.sleep(0.1)
+
+                self.worker.send_cmd(
+                    ":CAL:SAVE"
+                )
+
+                self.append_log(
+                    f"[CAL] NORMAL calibration transfer complete. "
+                    f"{success_count} rows uploaded."
+                )
+
+                QMessageBox.information(
+                    self,
+                    "Normal Calibration Upload Complete",
+                    f"Device Serial Number: {device_serial}\n\n"
+                    f"{success_count} normal calibration points "
+                    f"were transferred and saved."
+                )
+
+            # =====================================================
+            # HIGH POWER CALIBRATION
+            # =====================================================
+            elif calibration_type == "HIGH_POWER":
+
+                self.append_log(
+                    "[HPCAL] Loading HIGH POWER calibration..."
+                )
+
+                # Keep device serial synchronized.
+                self.worker.send_cmd(
+                    f":CAL:SER {device_serial}"
+                )
+
+                # Clears ONLY the High Power RAM table.
+                # Normal calibration is untouched.
+                self.worker.send_cmd(
+                    ":HPCAL:CLEAR"
+                )
+
+                success_count = 0
+
+                # Empty High Power cells are intentionally stored as -1.
+                # -1 means this target power is unavailable at this frequency.
+                def parse_hp_val(val_str):
+                    v = (
+                        val_str
+                        .strip()
+                        .replace(',', '.')
+                    )
+
+                    if not v or v.lower() == 'nan':
+                        return -1
+
+                    try:
+                        return int(round(float(v)))
+                    except ValueError:
+                        return -1
+
+                for i in range(1, len(lines)):
+
+                    line = lines[i].strip()
+
+                    if not line:
+                        continue
+
+                    cols = line.split(';')
+
+                    # Merged High Power CSV format:
+                    # 0  Freq_MHz
+                    # 1  Att8_ON
+                    # 2  Att9_ON
+                    # 3  Att10_ON
+                    # 4  Att11_ON
+                    # 5  Att12_ON
+                    # 6  Att13_OFF
+                    # 7  Att14_OFF
+                    # 8  Att15_OFF
+                    # 9  Att16_OFF
+                    # 10 Att17_OFF
+                    # 11 Att18_OFF
+                    if len(cols) < 12:
+                        continue
+
+                    try:
+                        freq = int(
+                            float(
+                                cols[0]
+                                .strip()
+                                .replace(',', '.')
+                            )
+                        )
+
+                        att8_on = parse_hp_val(cols[1])
+                        att9_on = parse_hp_val(cols[2])
+                        att10_on = parse_hp_val(cols[3])
+                        att11_on = parse_hp_val(cols[4])
+                        att12_on = parse_hp_val(cols[5])
+
+                        att13_off = parse_hp_val(cols[6])
+                        att14_off = parse_hp_val(cols[7])
+                        att15_off = parse_hp_val(cols[8])
+                        att16_off = parse_hp_val(cols[9])
+                        att17_off = parse_hp_val(cols[10])
+                        att18_off = parse_hp_val(cols[11])
+
+                        cmd = (
+                            f":HPCAL:DATA "
+                            f"{freq},"
+                            f"{att8_on},"
+                            f"{att9_on},"
+                            f"{att10_on},"
+                            f"{att11_on},"
+                            f"{att12_on},"
+                            f"{att13_off},"
+                            f"{att14_off},"
+                            f"{att15_off},"
+                            f"{att16_off},"
+                            f"{att17_off},"
+                            f"{att18_off}"
+                        )
+
+                        self.worker.send_cmd(cmd)
+
+                        # Same serial-buffer protection used by normal calibration.
+                        if i % 10 == 0:
+                            time.sleep(0.05)
+
+                        success_count += 1
+
+                    except Exception:
+                        continue
+
+                time.sleep(0.1)
+
+                self.worker.send_cmd(
+                    ":HPCAL:SAVE"
+                )
+
+                self.append_log(
+                    f"[HPCAL] HIGH POWER calibration transfer complete. "
+                    f"{success_count} rows uploaded."
+                )
+
+                QMessageBox.information(
+                    self,
+                    "High Power Calibration Upload Complete",
+                    f"Device Serial Number: {device_serial}\n\n"
+                    f"{success_count} High Power calibration points "
+                    f"were transferred and saved."
+                )
 
         except Exception as e:
-            self.append_log(f"[ERR] CSV upload error: {str(e)}")
+            self.append_log(
+                f"[ERR] CSV upload error: {str(e)}"
+            )
 
     def flash_firmware(self):
         """Uploads the selected .bin file to the device via esptool (no Arduino IDE required)."""

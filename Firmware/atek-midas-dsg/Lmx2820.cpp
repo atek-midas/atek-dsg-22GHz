@@ -6,7 +6,7 @@
 #include "main.h"
 #include "Lmx2820.h"
 
-#define PLL_DEN 1000 
+#define PLL_DEN 40000000UL
 #define OSC_2X 2  
 #define MULT 1
 #define PLL_R_PRE 1
@@ -81,9 +81,9 @@ bool Lmx2820SetFreqinMHz(double target_freq , double ref_clock , bool isFiltered
 	    uint32_t PLL_N = (uint32_t)N_divider_exact;  // Integer component.
 
 	    // Precise fractional calculation.
-	    double N_fractional = round((N_divider_exact - PLL_N) * PLL_DEN) / PLL_DEN;
-	    uint32_t PLL_NUM = (uint32_t)(N_fractional * PLL_DEN);
-	    double N_fractional_final = (double)PLL_NUM / PLL_DEN;
+	    uint32_t PLL_NUM = (uint32_t)round( (N_divider_exact - PLL_N) * (double)PLL_DEN );
+	    if (PLL_NUM >= PLL_DEN) { PLL_N++; PLL_NUM = 0; }
+	    double N_fractional_final = (double)PLL_NUM / (double)PLL_DEN;
 
  
     uint32_t CHDIVA,CHDIVB;
@@ -210,9 +210,9 @@ void Lmx2820SetFreqinMHz_Fast(double target_freq , double ref_clock)
 	    uint32_t PLL_N = (uint32_t)N_divider_exact;  // Integer component.
 
 	    // Precise fractional calculation.
-	    double N_fractional = round((N_divider_exact - PLL_N) * PLL_DEN) / PLL_DEN;
-	    uint32_t PLL_NUM = (uint32_t)(N_fractional * PLL_DEN);
-	    double N_fractional_final = (double)PLL_NUM / PLL_DEN;
+	    uint32_t PLL_NUM = (uint32_t)round( (N_divider_exact - PLL_N) * (double)PLL_DEN );
+	    if (PLL_NUM >= PLL_DEN) { PLL_N++; PLL_NUM = 0; }
+	    double N_fractional_final = (double)PLL_NUM / (double)PLL_DEN;
 
  
     uint32_t CHDIVA, CHDIVB;
