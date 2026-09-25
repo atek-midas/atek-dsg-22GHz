@@ -9,6 +9,7 @@
 #include "ADC78H90.h"
 
 extern void RC_HandleLine(char *line);
+extern void RC_RecalculateSweepPowerLimit();
 
 extern bool rfOutputEnabled;
 
@@ -132,14 +133,14 @@ void GetTouchData(int x, int y) {
   if (currentMenu == MAIN_MENU) {
     if (x > 3 && x < 80 && y > 3 && y < 45) {  // Frequency button
       Serial.println("Frequency Button Pressed");
-      prev_enteredFreqValue = enteredFreqValue;
-      prev_enteredUnitValue = enteredUnitValue;
+      //prev_enteredFreqValue = enteredFreqValue;
+      //prev_enteredUnitValue = enteredUnitValue;
       drawFreqMenu(currentMenu);
     } else if (x > 3 && x < 80 && y > 53 && y < 95) {  // Amplitude button
       Serial.println("Amplitude Button Pressed");
-      prev_enteredAmpValue = enteredAmpValue;
+      //prev_enteredAmpValue = enteredAmpValue;
       drawAmpMenu(currentMenu);
-    }else if (x > 3 && x < 80 && y > 100 && y < 142) {  // Filter button
+    }else if (x > 3 && x < 80 && y > 100 && y < 142) {  // Filter buttonf
       FilterStatus = !FilterStatus;
       SetFilter(FilterStatus);
       if (FilterStatus) 
@@ -164,8 +165,13 @@ void GetTouchData(int x, int y) {
     }
     else
     {
-        checkenteredFreqValue(enteredFreqValue);  // first apply freq
-        SetRfOnOff(true);                         // then turn RF on
+       SetRfOnOff(true);                         // önce PLL CE'yi aç
+        delay(20);                                // LMX'in ayağa kalkması için bekle
+
+        enteredFreqValue = FreqValueForMainMenu;
+        enteredUnitValue = FreqUnitForMainMenu;
+        checkenteredFreqValue(enteredFreqValue);  // sonra frekans + POW:LEV (CE açıkken)
+
         Serial.println("RF Out ON Button Pressed");
     }
 
@@ -280,7 +286,7 @@ void GetTouchData(int x, int y) {
     // **Enter, Backspace, Dot and 0 buttons**
     else if (x > XposEBD0 && x < XposEBD0 + ButtonWidth) {
       if (y > Ypos7890G && y < Ypos7890G + ButtonHeight) { Serial.println("Pressed: 0"); enteredDecimalValue += "0"; }
-      else if (y > Ypos456DM && y < Ypos456DM + ButtonHeight) { Serial.println("Pressed: .");    if (enteredDecimalValue.indexOf('.') == -1) enteredDecimalValue += ".";   }
+      else if (y > Ypos456DM && y < Ypos456DM + ButtonHeight) { Serial.println("Pressed: . (ignored)"); }
       else if (y > YposEX && y < YposEX + ButtonHeight) { Serial.println("Pressed: Enter");  if (currentMenu == SWP_COUNT_MENU && enteredDecimalValue.length() == 0) {enteredDecimalValue = "0";}  if (currentMenu == DWELL_MENU && enteredDecimalValue.length() == 0) {enteredDecimalValue = "1";}  drawActiveMenu();  }
       else if (y > Ypos123BK && y < Ypos123BK + ButtonHeight) { Serial.println("Pressed: Backspace");      if (!enteredDecimalValue.isEmpty()) enteredDecimalValue.remove(enteredDecimalValue.length() - 1);  }
     }
@@ -352,6 +358,7 @@ void GetTouchData(int x, int y) {
             FilterStatus = !FilterStatus;
             SetFilter(FilterStatus);
             SetFilterOnSweepMenu(FilterStatus);
+            RC_RecalculateSweepPowerLimit();
           }
           else
           {
@@ -402,10 +409,17 @@ bool checkenteredFreqValue(String FreqVal) {
     switch (currentMenu) {
 
       // START: must be inside device range
-      case START_MENU:
-        if (freqValue < MIN_FREQ || freqValue > MAX_FREQ)
+      case START_MENU:{
+         double stopHz = StopValueForSweepMenu.toDouble();
+         if (StopUnitForSweepMenu == "KHz") stopHz *= 1e3;
+         else if (StopUnitForSweepMenu == "MHz") stopHz *= 1e6;
+         else if (StopUnitForSweepMenu == "GHz") stopHz *= 1e9;
+
+         if (freqValue < MIN_FREQ || freqValue > MAX_FREQ || freqValue >= stopHz)
           outOfRange = true;
-        break;
+         break;
+      }
+
 
       // STOP: must be greater than START and ≤ MAX_FREQ
       case STOP_MENU: {
@@ -420,11 +434,11 @@ bool checkenteredFreqValue(String FreqVal) {
           startHz *= 1e9;
         }
 
-        if (freqValue < startHz || freqValue > MAX_FREQ)
+        if (freqValue <= startHz || freqValue > MAX_FREQ)
           outOfRange = true;
         
         break;
-      }
+     }
 
       // STEP: must be > 0 and smaller than (STOP - START), with proper unit conversion
       case STEP_MENU: {
@@ -456,7 +470,7 @@ bool checkenteredFreqValue(String FreqVal) {
             outOfRange = true;
 
         break;
-    }
+     }
 
 
 
@@ -525,7 +539,7 @@ bool checkenteredAmpValue() {
     double AmpValue = tempAmp.toDouble();
 
     // Target Power range has been extended to -30.0 to 30.0 dBm.
-    if (AmpValue < -30.0 || AmpValue > 30.0) {
+    if (AmpValue > 30.0) {
       tft.fillRect(10, 4, 108, 35, TFT_WHITE); // Clear old value
       tft.setTextColor(TFT_RED, TFT_WHITE);
       tft.setCursor(10, 32);
@@ -826,9 +840,16 @@ void drawSweepMenu()
   if (enteredFrom == START_MENU) { StartValueForSweepMenu = enteredFreqValue; }
   else if (enteredFrom == STOP_MENU) { StopValueForSweepMenu = enteredFreqValue; }
   else if (enteredFrom == STEP_MENU) { StepValueForSweepMenu = enteredFreqValue; }      
-  else if (enteredFrom == DWELL_MENU) { DwellValueForSweepMenu = enteredDecimalValue; }    
+  else if (enteredFrom == DWELL_MENU) {
+    int dwellVal = enteredDecimalValue.toInt();
+    if (dwellVal < 1) dwellVal = 1;
+    DwellValueForSweepMenu = String(dwellVal);
+  }
   else if (enteredFrom == AMP_MENU) { AmpValueSweepForSweepMenu = enteredAmpValue; }
-  else if (enteredFrom == SWP_COUNT_MENU) { CountValueForSweepMenu = enteredDecimalValue; }
+  else if (enteredFrom == SWP_COUNT_MENU) { CountValueForSweepMenu = String(enteredDecimalValue.toInt()); }
+  // Start / Stop / Power may have changed.
+  // Recalculate the valid Sweep Target Power for the complete range.
+  RC_RecalculateSweepPowerLimit();
 
   SetStartFreqOnSweepMenu(StartValueForSweepMenu);
   SetStopFreqOnSweepMenu(StopValueForSweepMenu);
@@ -864,6 +885,8 @@ void drawFreqMenu(MenuState menu) {
   tft.pushImage(0, 0, 320, 170, (uint16_t*)FreqSet);
   enteredFreqValue = FreqValueForMainMenu;
   enteredUnitValue = FreqUnitForMainMenu;
+  prev_enteredFreqValue = enteredFreqValue;   // EKLE
+  prev_enteredUnitValue = enteredUnitValue;   // EKLE
   updateFreqAreaOnFreqMenu(enteredFreqValue, enteredUnitValue);
 }
 void drawAmpMenu(MenuState menu) {
@@ -877,6 +900,7 @@ void drawAmpMenu(MenuState menu) {
   {
     enteredAmpValue = AmpValueForMainMenu;
   }
+  prev_enteredAmpValue = enteredAmpValue;     // EKLE
   tft.pushImage(0, 0, 320, 170, (uint16_t*)AmpSet);
   updateAmpAreaOnAmpMenu();
 }
@@ -1149,6 +1173,12 @@ void SetFilter(bool FilState)
     double fMHz = freqValue / 1e6;
 
     SetFilterState(FilState);
+        // Yol değişir değişmez yeni yola ait LO + ATT değerini uygula
+    if (AmpValueForMainMenu.length() > 0) {
+      char cmdBuf[32];
+      snprintf(cmdBuf, sizeof(cmdBuf), "POW:LEV %s", AmpValueForMainMenu.c_str());
+      RC_HandleLine(cmdBuf);
+    }
 
     if (FilState)
     {
@@ -1204,9 +1234,8 @@ void SetRfOnOff(bool value)
     CurrentRFStatus = value;
     rfOutputEnabled = value;
 
-    SetPLL1OnOff(value); // Send the command directly to the hardware.
+    SetPLL1OnOff(value);
 
-    // Always refresh the icon.
     if (currentMenu == MAIN_MENU) {
         if (value)
             tft.pushImage(264, 42, 48, 48, (uint16_t*)RF_ON);

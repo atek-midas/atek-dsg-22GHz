@@ -436,6 +436,102 @@ bool GetHighPowerLookupAtt(
 }
 
 // ==============================================================
+/*
+ * Returns the maximum target power that is safely available
+ * across the COMPLETE sweep frequency range.
+ *
+ * The most restrictive frequency inside Start..Stop determines
+ * the Sweep Target Power upper limit.
+ *
+ * Filter ON:
+ *   High Power LUT range = 8..12 dBm
+ *   If no High Power value exists at a point, normal range max = 7 dBm
+ *
+ * Filter OFF:
+ *   High Power LUT range = 13..18 dBm
+ *   If no High Power value exists at a point, normal range max = 12 dBm
+ */
+bool GetHighPowerRangeMaxPower(
+    double startMHz,
+    double stopMHz,
+    bool filterOn,
+    float *maxPowerOut
+)
+{
+    if (maxPowerOut == nullptr || highPowerCalibCount == 0)
+        return false;
+
+    // Safety: always evaluate from low frequency to high frequency.
+    if (startMHz > stopMHz)
+    {
+        double temp = startMHz;
+        startMHz = stopMHz;
+        stopMHz = temp;
+    }
+
+    const float requestedTop =
+        filterOn ? 12.0f : 18.0f;
+
+    // If a frequency row has no High Power value at all,
+    // fall back to the highest value before High Power mode starts.
+    const float normalFallbackMax =
+        filterOn ? 7.0f : 12.0f;
+
+    float rangeMaxPower = requestedTop;
+    bool checkedAnyFrequency = false;
+
+    auto checkFrequency = [&](double freqMHz)
+    {
+        uint8_t dummyAtt = 31;
+        float appliedPower = 0.0f;
+
+        bool found = GetHighPowerLookupAtt(
+            freqMHz,
+            filterOn,
+            requestedTop,
+            &dummyAtt,
+            &appliedPower
+        );
+
+        float thisFrequencyMax =
+            found ? appliedPower : normalFallbackMax;
+
+        if (!checkedAnyFrequency ||
+            thisFrequencyMax < rangeMaxPower)
+        {
+            rangeMaxPower = thisFrequencyMax;
+        }
+
+        checkedAnyFrequency = true;
+    };
+
+    // Always check both sweep boundaries.
+    checkFrequency(startMHz);
+    checkFrequency(stopMHz);
+
+    // Check every calibration row located inside the sweep range.
+    // This finds the most restrictive frequency section without
+    // depending on Sweep Step size.
+    for (int i = 0; i < highPowerCalibCount; i++)
+    {
+        double rowFreq =
+            highPowerCalibTable[i].freq_MHz;
+
+        if (rowFreq > startMHz &&
+            rowFreq < stopMHz)
+        {
+            checkFrequency(rowFreq);
+        }
+    }
+
+    if (!checkedAnyFrequency)
+        return false;
+
+    *maxPowerOut = rangeMaxPower;
+    return true;
+}
+
+// ==============================================================
 
 // --------------------------------------------------------------
 // Persistent RF settings
@@ -603,7 +699,7 @@ void setup() {
 
   IO_EXP1_Init();
 
-  ConnectionStatus("Wait...", true);  delay(1000);
+  ConnectionStatus("WiFi Off", true);
 
   InitPLL();
   
@@ -627,6 +723,16 @@ else if (currentFreqUnit == "GHz")
 
   // Apply the saved frequency to the PLL
 Lmx2820SetFreqinMHz(startupFreqMHz, 10000000, FilterStatus);
+  // Kayıtlı ayarları "entered" değişkenlerine de aktar
+  enteredFreqValue = currentFrequency;
+  enteredUnitValue = currentFreqUnit;
+  enteredAmpValue  = currentAmplitude;
+
+  // Kayıtlı gücü donanıma uygula (LO gücü + attenüatör)
+  char cmdBuf[32];
+  snprintf(cmdBuf, sizeof(cmdBuf), "POW:LEV %s", currentAmplitude.c_str());
+  RC_HandleLine(cmdBuf);
+
 }
 
 // --------------------------------------------------------------
@@ -1467,7 +1573,7 @@ void manageWiFiConnection() {
     case WIFI_HOTSPOT:
     {
       ConnectionStatus("Hotspot...", true);
-      WiFi.mode(WIFI_AP);
+      WiFi.mode(WIFI_OFF);
       WiFi.softAP(apSSID.c_str(), apPassword);
       
       int retries = 0;
@@ -1516,12 +1622,12 @@ void loop() {
   if (isSweepRunning && currentMenu == SWEEP_MENU)
   {
      RunSweep();
-     server.handleClient(); 
+     //server.handleClient(); 
      return; 
   }
   
-  server.handleClient();
-  manageWiFiConnection();
+ // server.handleClient();
+ // manageWiFiConnection();
   
   if (currentTime - lastUpdateTime2 >= 500)
   {

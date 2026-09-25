@@ -171,6 +171,16 @@ extern bool GetHighPowerLookupAtt(
     uint8_t *attOut,
     float *appliedPowerDBm
 );
+
+extern bool GetHighPowerRangeMaxPower(
+    double startMHz,
+    double stopMHz,
+    bool filterOn,
+    float *maxPowerOut
+);
+
+void RC_RecalculateSweepPowerLimit();
+
 // Access to the device's own display-state variables
 extern String AmpValueForMainMenu;
 extern String enteredAmpValue;
@@ -363,6 +373,8 @@ static void h_filt(char *args, int q) {
   char cmdBuf[32];
   sprintf(cmdBuf, "POW:LEV %s", AmpValueForMainMenu.c_str());
   RC_HandleLine(cmdBuf);
+  // Filter changed -> also recalculate Sweep Target Power.
+  RC_RecalculateSweepPowerLimit();
   // --------------------------------------------------------------------------
   rc_writeln(on ? "1" : "0");
 }
@@ -590,11 +602,18 @@ static void h_pow_lev(char *args, int q) {
     return;
   }
 
-  // Valid DSG RF power range.
-  if (targetDBm < -30.0f || targetDBm > 31.0f) {
+  // Upper absolute safety limit remains unchanged.
+  if (targetDBm > 31.0f) {
     rc_writeln("-222,Data out of range");
     return;
   }
+
+  // New global minimum target power.
+  // Any value below -20 dBm becomes -20 dBm.
+  if (targetDBm < -20.0f) {
+    targetDBm = -20.0f;
+  }
+  targetDBm = roundf(targetDBm);   // EKLE: ondalık gelirse tam sayıya yuvarla
 
   // ============================================================================
  // HIGH POWER LOOKUP TABLE MODE
@@ -665,19 +684,14 @@ static void h_pow_lev(char *args, int q) {
 
 
     // ----------------------------------------------------------
-    // Keep the USER REQUESTED target in the state.
+    // Store the ACTUALLY APPLIED High Power target.
     //
     // Example:
-    // User requests 12 dBm but this frequency supports only 8 dBm.
-    // Hardware applies the 8 dBm LUT value, but requested target
-    // remains 12 dBm. If the user later changes to a frequency
-    // where 12 dBm is available, ApplyFrequency() will automatically
-    // try 12 dBm again.
+    // User requests 14 dBm.
+    // This frequency/filter combination supports max 12 dBm.
+    // Hardware applies 12 dBm and the display/state also becomes 12 dBm.
     // ----------------------------------------------------------
-    String targetStr =
-        (targetDBm == 0.0f)
-        ? "0"
-        : String(targetDBm, 1);
+    String targetStr =String((int)lroundf(appliedPowerDBm));
 
     AmpValueForMainMenu = targetStr;
     enteredAmpValue = targetStr;
@@ -782,7 +796,7 @@ static void h_pow_lev(char *args, int q) {
   SetAttenuator((uint8_t)finalAtt); // Apply the raw physical attenuation value to the hardware
 
   // Store and display the requested target power value in dBm
-  String targetStr = (targetDBm == 0.0) ? "0" : String(targetDBm, 1);
+  String targetStr = String((int)targetDBm);
   AmpValueForMainMenu = targetStr;
   enteredAmpValue = targetStr;
   currentAmplitude = targetStr;
@@ -1137,6 +1151,92 @@ static void h_disp_menu(char *args, int q) {
 }
 
 // =======================================================
+// SWEEP TARGET POWER LIMIT
+// =======================================================
+
+static double SweepValueToMHz(
+    const String &value,
+    const String &unit
+)
+{
+    double freqMHz = value.toDouble();
+
+    if (unit == "GHz")
+        freqMHz *= 1000.0;
+    else if (unit == "KHz")
+        freqMHz /= 1000.0;
+
+    // MHz already requires no conversion.
+    return freqMHz;
+}
+
+
+void RC_RecalculateSweepPowerLimit()
+{
+    extern bool FilterStatus;
+
+    float targetDBm =
+        AmpValueSweepForSweepMenu.toFloat();
+
+    // ---------------------------------------------------
+    // Global minimum power
+    // ---------------------------------------------------
+    if (targetDBm < -20.0f)
+        targetDBm = -20.0f;
+
+    // ---------------------------------------------------
+    // Read complete Sweep frequency range
+    // ---------------------------------------------------
+    double startMHz =
+        SweepValueToMHz(
+            StartValueForSweepMenu,
+            StartUnitForSweepMenu
+        );
+
+    double stopMHz =
+        SweepValueToMHz(
+            StopValueForSweepMenu,
+            StopUnitForSweepMenu
+        );
+
+    // ---------------------------------------------------
+    // Find the most restrictive maximum power
+    // across the complete Start..Stop range.
+    // ---------------------------------------------------
+    float rangeMaxPower = 0.0f;
+
+    bool foundRangeLimit =
+        GetHighPowerRangeMaxPower(
+            startMHz,
+            stopMHz,
+            FilterStatus,
+            &rangeMaxPower
+        );
+
+    if (foundRangeLimit &&
+        targetDBm > rangeMaxPower)
+    {
+        targetDBm = rangeMaxPower;
+    }
+
+    // ---------------------------------------------------
+    // Store the real valid Sweep Target Power
+    // ---------------------------------------------------
+    String targetStr =String((int)lroundf(targetDBm));
+  
+
+    AmpValueSweepForSweepMenu = targetStr;
+
+    // If Sweep screen is visible, immediately refresh it.
+    if (currentMenu == SWEEP_MENU)
+    {
+        SetAmpAmpOnSweepMenu(
+            AmpValueSweepForSweepMenu
+        );
+    }
+}
+
+// =======================================================
 // SWEEP MENU NEW COMMAND HANDLERS (PYTHON COMPATIBLE)
 // =======================================================
 
@@ -1176,6 +1276,7 @@ static void h_sweep_start(char *args, int q) {
 
     StartValueForSweepMenu = format_mhz(hz);
     StartUnitForSweepMenu = "MHz";
+    RC_RecalculateSweepPowerLimit();
 
     if (currentMenu == SWEEP_MENU) {
         SetStartFreqOnSweepMenu(StartValueForSweepMenu); 
@@ -1220,6 +1321,7 @@ static void h_sweep_stop(char *args, int q) {
 
     StopValueForSweepMenu = format_mhz(hz);
     StopUnitForSweepMenu = "MHz";
+    RC_RecalculateSweepPowerLimit();
 
     if (currentMenu == SWEEP_MENU) {
         SetStopFreqOnSweepMenu(StopValueForSweepMenu);
@@ -1265,9 +1367,9 @@ static void h_sweep_dwell(char *args, int q) {
     }
 
     if (!args || !*args) { rc_writeln("-109,Missing parameter"); return; }
-    char *endp = nullptr;
-    double ms = strtod(args, &endp);
-    if (!endp || *endp!=0) { rc_writeln("-104,Data type error"); return; }
+     char *endp = nullptr;
+    long ms = strtol(args, &endp, 10);
+    if (!endp || *endp!=0 || ms < 1) { rc_writeln("-104,Data type error"); return; }
     DwellValueForSweepMenu = String(ms);
     if (currentMenu == SWEEP_MENU) {
         SetDwellFreqOnSweepMenu(DwellValueForSweepMenu); 
@@ -1306,13 +1408,21 @@ static void h_sweep_pow(char *args, int q) {
     double dbm = strtod(args, &endp); // Read fractional dBm values as floating-point input
     if (!endp || *endp!=0) { rc_writeln("-104,Data type error"); return; }
     
-    AmpValueSweepForSweepMenu = String(dbm, 1); 
-    
-    // Immediately update the UI from the command received through the GUI
-    if (currentMenu == SWEEP_MENU) {
-        SetAmpAmpOnSweepMenu(AmpValueSweepForSweepMenu); 
+    // Keep the existing absolute upper safety limit.
+    if (dbm > 31.0) {
+       rc_writeln("-222,Data out of range");
+      return;
     }
-    rc_writeln("0");
+
+   // First store the requested value.
+   AmpValueSweepForSweepMenu = String((int)lround(dbm));
+
+   // Then clamp it to:
+   //   1) minimum -20 dBm
+   //   2) maximum allowed by the COMPLETE Sweep range
+   RC_RecalculateSweepPowerLimit();
+
+   rc_writeln("0");
 }
 
 static void h_sweep_type(char *args, int q) {

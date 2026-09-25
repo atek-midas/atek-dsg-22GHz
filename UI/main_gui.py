@@ -912,7 +912,7 @@ class DSGMainWindow(QMainWindow):
 
                     # Existing normal calibration CSV requires
                     # at least 18 columns.
-                    if len(cols) < 18:
+                    if len(cols) < 13:
                         continue
 
                     try:
@@ -952,9 +952,17 @@ class DSGMainWindow(QMainWindow):
                         att3_on = parse_normal_val(cols[3], True)
                         attn3_on = parse_normal_val(cols[5], True)
 
-                        att6_off = parse_normal_val(cols[13], False)
-                        att3_off = parse_normal_val(cols[15], False)
-                        attn3_off = parse_normal_val(cols[17], False)
+                        # Old normal calibration CSV format
+                        if len(cols) >= 18:
+                            att6_off = parse_normal_val(cols[13], False)
+                            att3_off = parse_normal_val(cols[15], False)
+                            attn3_off = parse_normal_val(cols[17], False)
+
+                        # New normal calibration CSV format
+                        else:
+                            att6_off = parse_normal_val(cols[7], False)
+                            att3_off = parse_normal_val(cols[9], False)
+                            attn3_off = parse_normal_val(cols[11], False)
 
                         cmd = (
                             f":CAL:DATA "
