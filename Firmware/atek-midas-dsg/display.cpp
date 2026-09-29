@@ -165,12 +165,12 @@ void GetTouchData(int x, int y) {
     }
     else
     {
-       SetRfOnOff(true);                         // önce PLL CE'yi aç
-        delay(20);                                // LMX'in ayağa kalkması için bekle
+       SetRfOnOff(true);                         
+        delay(20);                                
 
         enteredFreqValue = FreqValueForMainMenu;
         enteredUnitValue = FreqUnitForMainMenu;
-        checkenteredFreqValue(enteredFreqValue);  // sonra frekans + POW:LEV (CE açıkken)
+        checkenteredFreqValue(enteredFreqValue);  
 
         Serial.println("RF Out ON Button Pressed");
     }
@@ -885,8 +885,8 @@ void drawFreqMenu(MenuState menu) {
   tft.pushImage(0, 0, 320, 170, (uint16_t*)FreqSet);
   enteredFreqValue = FreqValueForMainMenu;
   enteredUnitValue = FreqUnitForMainMenu;
-  prev_enteredFreqValue = enteredFreqValue;   // EKLE
-  prev_enteredUnitValue = enteredUnitValue;   // EKLE
+  prev_enteredFreqValue = enteredFreqValue;   
+  prev_enteredUnitValue = enteredUnitValue;   
   updateFreqAreaOnFreqMenu(enteredFreqValue, enteredUnitValue);
 }
 void drawAmpMenu(MenuState menu) {
@@ -900,7 +900,7 @@ void drawAmpMenu(MenuState menu) {
   {
     enteredAmpValue = AmpValueForMainMenu;
   }
-  prev_enteredAmpValue = enteredAmpValue;     // EKLE
+  prev_enteredAmpValue = enteredAmpValue;     
   tft.pushImage(0, 0, 320, 170, (uint16_t*)AmpSet);
   updateAmpAreaOnAmpMenu();
 }
@@ -1173,7 +1173,7 @@ void SetFilter(bool FilState)
     double fMHz = freqValue / 1e6;
 
     SetFilterState(FilState);
-        // Yol değişir değişmez yeni yola ait LO + ATT değerini uygula
+        
     if (AmpValueForMainMenu.length() > 0) {
       char cmdBuf[32];
       snprintf(cmdBuf, sizeof(cmdBuf), "POW:LEV %s", AmpValueForMainMenu.c_str());

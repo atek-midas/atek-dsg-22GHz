@@ -15,7 +15,7 @@
 // NOTE: The examples below document the CURRENT handler behavior in this firmware.
 // ----------------------------------------------------------------------------
 // IDENTIFICATION / RESET
-// *IDN?                     -> ATEK,DSG-22.6GHz,r1.0   (device identification)
+// *IDN?                     -> DSG-22.6GHz,r1.0   (device identification)
 // *RST                      -> Not Implemented yet!    (placeholder; no reset is performed)
 //
 // CW FREQUENCY / POWER / RF PATH
@@ -457,7 +457,7 @@ static int split_params(char *args, char *outv[], int maxv) {
 // === Handlers ===
 static void h_idn (char *args, int q) {
   (void)args; (void)q;
-  rc_writeln("ATEK,DSG-22.6GHz,r1.0");
+  rc_writeln("DSG,DSG-22.6GHz,0,r1.0");
 }
 
 static void h_rst (char *args, int q) {
@@ -613,7 +613,7 @@ static void h_pow_lev(char *args, int q) {
   if (targetDBm < -20.0f) {
     targetDBm = -20.0f;
   }
-  targetDBm = roundf(targetDBm);   // EKLE: ondalık gelirse tam sayıya yuvarla
+  targetDBm = roundf(targetDBm);   
 
   // ============================================================================
  // HIGH POWER LOOKUP TABLE MODE
@@ -825,12 +825,12 @@ static void h_cal_serial(char *args, int q) {
     char serialBuf[16] = {0};
     strncpy(serialBuf, args, sizeof(serialBuf) - 1);
 
-    // Büyük harfe çevir
+    
     for (int i = 0; serialBuf[i]; i++) {
         serialBuf[i] = (char)toupper((unsigned char)serialBuf[i]);
     }
 
-    // Beklenen format: SN_002
+    
     if (strlen(serialBuf) != 6 ||
         strncmp(serialBuf, "SN_", 3) != 0 ||
         !isdigit(serialBuf[3]) ||
@@ -843,7 +843,7 @@ static void h_cal_serial(char *args, int q) {
 
     deviceSerial = String(serialBuf);
     // Update Wi-Fi name according to the new serial number
-    apSSID = "ATEK_DSG_22.6GHz_" + deviceSerial;
+    apSSID = "DSG_22.6GHz_" + deviceSerial;
 
     rc_writeln("0");
 }

@@ -11,7 +11,7 @@
 
 const char *apPassword = "12345678";
 
-String apSSID = "ATEK_DSG_22.6GHz";
+String apSSID = "DSG_22.6GHz";
 String deviceSerial = "UNKNOWN";
 
 String currentFrequency; 
@@ -95,9 +95,9 @@ void InitCalibrationData() {
 
     // Create device-specific Wi-Fi SSID
     if (deviceSerial != "UNKNOWN" && deviceSerial.length() > 0) {
-      apSSID = "ATEK_DSG_22.6GHz_" + deviceSerial;
+      apSSID = "DSG_22.6GHz_" + deviceSerial;
       } else {
-        apSSID = "ATEK_DSG_22.6GHz";
+        apSSID = "DSG_22.6GHz";
         }
 
     calibCount = preferences.getUShort("count", 0);
@@ -723,12 +723,12 @@ else if (currentFreqUnit == "GHz")
 
   // Apply the saved frequency to the PLL
 Lmx2820SetFreqinMHz(startupFreqMHz, 10000000, FilterStatus);
-  // Kayıtlı ayarları "entered" değişkenlerine de aktar
+
   enteredFreqValue = currentFrequency;
   enteredUnitValue = currentFreqUnit;
   enteredAmpValue  = currentAmplitude;
 
-  // Kayıtlı gücü donanıma uygula (LO gücü + attenüatör)
+  
   char cmdBuf[32];
   snprintf(cmdBuf, sizeof(cmdBuf), "POW:LEV %s", currentAmplitude.c_str());
   RC_HandleLine(cmdBuf);
