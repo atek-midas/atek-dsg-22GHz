@@ -602,12 +602,6 @@ static void h_pow_lev(char *args, int q) {
     return;
   }
 
-  // Upper absolute safety limit remains unchanged.
-  if (targetDBm > 31.0f) {
-    rc_writeln("-222,Data out of range");
-    return;
-  }
-
   // New global minimum target power.
   // Any value below -20 dBm becomes -20 dBm.
   if (targetDBm < -20.0f) {
@@ -1408,11 +1402,6 @@ static void h_sweep_pow(char *args, int q) {
     double dbm = strtod(args, &endp); // Read fractional dBm values as floating-point input
     if (!endp || *endp!=0) { rc_writeln("-104,Data type error"); return; }
     
-    // Keep the existing absolute upper safety limit.
-    if (dbm > 31.0) {
-       rc_writeln("-222,Data out of range");
-      return;
-    }
 
    // First store the requested value.
    AmpValueSweepForSweepMenu = String((int)lround(dbm));

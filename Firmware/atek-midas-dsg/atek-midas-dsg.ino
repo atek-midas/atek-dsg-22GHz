@@ -565,8 +565,23 @@ void saveRFSettings() {
 }
 
 void toggleRFOutput() {
-  rfOutputEnabled = !rfOutputEnabled; 
-  SetRfOnOff(rfOutputEnabled); 
+  rfOutputEnabled = !rfOutputEnabled;
+
+  if (rfOutputEnabled)
+  {
+    SetRfOnOff(true);
+    delay(20);
+
+    extern String FreqValueForMainMenu;
+    extern String FreqUnitForMainMenu;
+
+    String cmdFreq = "FREQ " + FreqValueForMainMenu + FreqUnitForMainMenu;
+    RC_HandleLine((char*)cmdFreq.c_str());
+  }
+  else
+  {
+    SetRfOnOff(false);
+  }
 }
 
 void handleToggleRFOutput() {
@@ -699,7 +714,7 @@ void setup() {
 
   IO_EXP1_Init();
 
-  ConnectionStatus("WiFi Off", true);
+    ConnectionStatus("Wait...", true);  delay(1000);
 
   InitPLL();
   
@@ -929,6 +944,121 @@ String getHTML() {
       color: #f9e2af;
       margin-bottom: 10px;
     }
+
+    .target-power-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+    }
+
+    .target-power-label label {
+      margin: 0;
+    }
+
+    .power-info-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .power-info-icon {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 1px solid #89b4fa;
+      border-radius: 50%;
+      background-color: transparent;
+      color: #89b4fa;
+      font-size: 13px;
+      font-weight: bold;
+      line-height: 18px;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .power-info-icon:hover {
+      background-color: #89b4fa;
+      color: #11111b;
+    }
+
+    .power-info-popup {
+      display: none;
+      position: absolute;
+      z-index: 1000;
+
+      top: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+
+      width: min(380px, calc(100vw - 32px));
+      max-height: 70vh;
+      overflow-y: auto;
+
+      background-color: #181825;
+      border: 1px solid #45475a;
+      border-radius: 8px;
+      padding: 14px;
+
+      color: #cdd6f4;
+      font-size: 13px;
+      line-height: 1.45;
+
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    }
+
+    .power-info-wrapper:hover .power-info-popup {
+      display: block;
+    }
+
+    .power-info-popup.show {
+      display: block;
+    }
+
+    .power-info-popup h3 {
+      margin: 0 0 10px 0;
+      color: #f9e2af;
+      font-size: 16px;
+    }
+
+    .power-info-popup p {
+      margin: 0 0 12px 0;
+    }
+
+    .power-info-popup h4 {
+      margin: 14px 0 6px 0;
+      color: #89b4fa;
+      font-size: 14px;
+    }
+
+    .power-limit-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 8px;
+    }
+
+    .power-limit-table th,
+    .power-limit-table td {
+      border: 1px solid #45475a;
+      padding: 7px;
+      text-align: left;
+    }
+
+    .power-limit-table th {
+      background-color: #313244;
+      color: #f9e2af;
+    }
+
+    .power-limit-table td:last-child,
+    .power-limit-table th:last-child {
+      text-align: center;
+      white-space: nowrap;
+    }
+
+
+
+
+
   </style>
 </head>
 <body>
@@ -939,7 +1069,7 @@ String getHTML() {
         <label>CW Frequency:</label>
         <div class="spinbox-container">
             <button id="btn_minus" class="btn-step">-</button>
-            <input type="number" step="0.001" id="frequency" value=")=====" + FreqValueForMainMenu + R"=====(" style="width:45%;">
+            <input type="text" inputmode="decimal" class="freq-input" id="frequency" value=")=====" + FreqValueForMainMenu + R"=====(" style="width:45%;">
             <select id="freqUnit" style="width:30%;">
               <option value="KHz" )=====" + String(FreqUnitForMainMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
               <option value="MHz" )=====" + String(FreqUnitForMainMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
@@ -950,7 +1080,7 @@ String getHTML() {
 
         <label>Increment Step:</label>
         <div class="spinbox-container" style="margin-bottom: 20px;">
-            <input type="number" step="0.001" id="step_val" value="100.0" style="width:65%;">
+            <input type="text" inputmode="decimal" class="freq-input" id="step_val" value="100" style="width:65%;">
             <select id="stepUnit" style="width:30%;">
               <option value="KHz">KHz</option>
               <option value="MHz" selected>MHz</option>
@@ -958,14 +1088,97 @@ String getHTML() {
             </select>
         </div>
 
+        <div class="target-power-label">
+
         <label>Target Power (dBm):</label>
-        <input type="number" id="amplitude" min="-20" max="20" step="0.1" value=")=====" + AmpValueForMainMenu + R"=====(" style="width:100%; margin-bottom:15px;">
+
+        <div class="power-info-wrapper">
+
+            <button
+              type="button"
+              class="power-info-icon"
+              id="powerInfoBtn"
+              aria-label="Target Power Information"
+            >i</button>
+
+            <div class="power-info-popup" id="powerInfoPopup">
+
+                <h3>Target Power Maximum Limits</h3>
+
+                <p>
+                  The maximum Target Power limit varies depending on the selected
+                  frequency and filter state.
+                </p>
+
+                <p>
+                  If the requested power is higher than the maximum power available
+                  for the current frequency and filter combination, the DSG
+                  automatically applies the highest available power. The actually
+                  applied power value is then shown on both the device display and
+                  the web interface.
+                </p>
+
+                <p>
+                  The maximum available Target Power limits are shown below.
+                </p>
+
+                <h4>Filter ON</h4>
+
+                 <table class="power-limit-table">
+                    <tr>
+                        <th>Frequency Range</th>
+                        <th>Max Power</th>
+                    </tr>
+                    <tr>
+                       <td>2 GHz - 8 GHz</td>
+                        <td>12 dBm</td>
+                    </tr>
+                    <tr>
+                        <td>8 GHz - 16 GHz</td>
+                        <td>10 dBm</td>
+                    </tr>
+                    <tr>
+                        <td>16 GHz - 18 GHz</td>
+                        <td>10 dBm</td>
+                    </tr>
+                </table>
+
+                <h4>Filter OFF</h4>
+
+               <table class="power-limit-table">
+                    <tr>
+                        <th>Frequency Range</th>
+                        <th>Max Power</th>
+                    </tr>
+                    <tr>
+                        <td>150 MHz - 19 GHz</td>
+                        <td>18 dBm</td>
+                    </tr>
+                    <tr>
+                        <td>19 GHz - 21 GHz</td>
+                        <td>17 dBm</td>
+                    </tr>
+                    <tr>
+                        <td>21 GHz - 22.6 GHz</td>
+                        <td>15 dBm</td>
+                    </tr>
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <input type="number" id="amplitude" min="-20" max="20" step="1" value=")=====" + AmpValueForMainMenu + R"=====(" style="width:100%; margin-bottom:15px;">
 
         <label>Filter:</label>
         <select id="filterSelect" style="width:100%; margin-bottom:15px;">
             <option value="0" )=====" + String(!FilterStatus ? "selected" : "") + R"=====(>Filter: OFF (0.15-22.6 GHz)</option>
             <option value="1" )=====" + String(FilterStatus ? "selected" : "") + R"=====(>Filter: ON (2-18 GHz)</option>
         </select>
+
+        <div id="cw_pll" class="live-item">LD Result: UNKNOWN</div>
 
         <button class="wide-button" id="applyCW" style="background-color:#89b4fa;">APPLY CW SETTINGS</button>
         <button class="wide-button" id="btn_rf" style="background-color:)=====" + btnRfColor + R"=====(">)=====" + btnRfText + R"=====(</button>
@@ -976,7 +1189,7 @@ String getHTML() {
         
         <label>Start Frequency:</label>
         <div class="spinbox-container">
-            <input type="number" step="0.001" id="sw_start" value=")=====" + StartValueForSweepMenu + R"=====(" style="width:65%;">
+            <input type="text" inputmode="decimal" class="freq-input" id="sw_start" value=")=====" + StartValueForSweepMenu + R"=====(" style="width:65%;">
             <select id="sw_start_unit" style="width:30%;">
                 <option value="KHz" )=====" + String(StartUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
                 <option value="MHz" )=====" + String(StartUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
@@ -991,7 +1204,7 @@ String getHTML() {
 
         <label>Stop Frequency:</label>
         <div class="spinbox-container">
-            <input type="number" step="0.001" id="sw_stop" value=")=====" + StopValueForSweepMenu + R"=====(" style="width:65%;">
+            <input type="text" inputmode="decimal" class="freq-input" id="sw_stop" value=")=====" + StopValueForSweepMenu + R"=====(" style="width:65%;">
             <select id="sw_stop_unit" style="width:30%;">
                 <option value="KHz" )=====" + String(StopUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
                 <option value="MHz" )=====" + String(StopUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
@@ -1006,7 +1219,7 @@ String getHTML() {
 
         <label>Step:</label>
         <div class="spinbox-container" style="margin-bottom: 15px;">
-            <input type="number" step="0.001" id="sw_step" value=")=====" + StepValueForSweepMenu + R"=====(" style="width:65%;">
+            <input type="text" inputmode="decimal" class="freq-input" id="sw_step" value=")=====" + StepValueForSweepMenu + R"=====(" style="width:65%;">
             <select id="sw_step_unit" style="width:30%;">
                 <option value="KHz" )=====" + String(StepUnitForSweepMenu == "KHz" ? "selected" : "") + R"=====(>KHz</option>
                 <option value="MHz" )=====" + String(StepUnitForSweepMenu == "MHz" ? "selected" : "") + R"=====(>MHz</option>
@@ -1017,13 +1230,19 @@ String getHTML() {
         <div style="display:flex; gap:10px; margin-bottom: 15px;">
             <div style="flex:1;">
                 <label>Dwell (ms):</label>
-                <input type="number" id="sw_dwell" value=")=====" + DwellValueForSweepMenu + R"=====(" style="width:100%;">
+                <input type="number" id="sw_dwell" min="1" step="1" value=")=====" + DwellValueForSweepMenu + R"=====(" style="width:100%;">
             </div>
             <div style="flex:1;">
                 <label>Target Power (dBm):</label>
-                <input type="number" id="sw_att" min="-20" max="20" step="0.1" value=")=====" + AmpValueSweepForSweepMenu + R"=====(" style="width:100%;">
+                <input type="number" id="sw_att" min="-20" max="20" step="1" value=")=====" + AmpValueSweepForSweepMenu + R"=====(" style="width:100%;">
             </div>
         </div>
+
+        <label>Filter:</label>
+        <select id="sw_filterSelect" style="width:100%; margin-bottom:15px;">
+          <option value="0" )=====" + String(!FilterStatus ? "selected" : "") + R"=====(>Filter: OFF (0.15-22.6 GHz)</option>
+          <option value="1" )=====" + String(FilterStatus ? "selected" : "") + R"=====(>Filter: ON (2-18 GHz)</option>
+          </select>
 
         <label>Type:</label>
         <select id="sw_type" style="width:100%; margin-bottom:15px;">
@@ -1063,14 +1282,199 @@ String getHTML() {
 
     <script>
       window.onload = function() {
+
+        document.querySelectorAll('.freq-input').forEach(input => {
+
+          let previousValue = input.value;
+
+          input.addEventListener('focus', () => {
+            previousValue = input.value;
+          });
+
+          input.addEventListener('keydown', (e) => {
+
+            if (
+              e.key === 'Backspace' ||
+              e.key === 'Delete' ||
+              e.key === 'ArrowLeft' ||
+              e.key === 'ArrowRight' ||
+              e.key === 'Tab' ||
+              e.key === 'Home' ||
+              e.key === 'End'
+            ) {
+              return;
+            }
+
+            if (e.ctrlKey || e.metaKey) {
+              return;
+            }
+
+            if (/^[0-9]$/.test(e.key)) {
+              return;
+            }
+
+            if ( (e.key === '.' || e.key === ',') && !input.value.includes('.') ) {
+              return;
+            }
+
+            e.preventDefault();
+          });
+
+          input.addEventListener('paste', (e) => {
+            const pastedText = e.clipboardData.getData('text');
+
+            if (!/^\d*[.,]?\d*$/.test(pastedText)) {
+              e.preventDefault();
+            }
+          });
+
+          input.addEventListener('input', () => {
+
+            let value = input.value .replace(/,/g, '.') .replace(/[^0-9.]/g, '');
+
+            const firstDot = value.indexOf('.');
+
+            if (firstDot !== -1) {
+              value =
+                value.substring(0, firstDot + 1) +
+                value.substring(firstDot + 1).replace(/\./g, '');
+            }
+
+            input.value = value;
+          });
+
+          input.addEventListener('blur', () => {
+            if (input.value.trim() === '') {
+              input.value = previousValue;
+            }
+          });
+
+        });
+
+        document.querySelectorAll('input[type="number"]').forEach(input => {
+          input.addEventListener('keydown', (e) => {
+            if (e.key === ',') {
+              e.preventDefault();
+            }
+          });
+
+          input.addEventListener('paste', (e) => {
+            const pastedText = e.clipboardData.getData('text');
+            if (pastedText.includes(',')) {
+              e.preventDefault();
+            }
+          });
+        });
+
+          const integerOnlyInputs = [
+           'amplitude',
+           'sw_att',
+           'sw_dwell',
+           'sw_count'
+          ];
+          
+          integerOnlyInputs.forEach(id => {
+            const input = document.getElementById(id);
+
+            input.addEventListener('keydown', (e) => {
+              if (e.key === '.' || e.key === ',' || e.key === 'Decimal') {
+                e.preventDefault();
+              }
+            });
+
+            input.addEventListener('paste', (e) => {
+              const pastedText = e.clipboardData.getData('text');
+
+              if (pastedText.includes('.') || pastedText.includes(',')) {
+                e.preventDefault();
+              }
+            });
+          });
+
+          const dwellInput = document.getElementById('sw_dwell');
+
+          dwellInput.addEventListener('keydown', (e) => {
+            if (
+              e.key === '-' ||
+              e.key === '+' ||
+              e.key === 'e' ||
+              e.key === 'E'
+            ) {
+              e.preventDefault();
+            }
+          });
+
+          dwellInput.addEventListener('input', () => {
+            if (dwellInput.value === '0') {
+              dwellInput.value = '1';
+            }
+
+            if (
+              dwellInput.value !== '' &&
+              parseInt(dwellInput.value, 10) < 1
+            ) {
+              dwellInput.value = '1';
+            }
+          });
+
+
+          const countInput = document.getElementById('sw_count');
+
+          countInput.addEventListener('keydown', (e) => {
+            if (
+              e.key === '-' ||
+              e.key === '+' ||
+              e.key === 'e' ||
+              e.key === 'E'
+            ) {
+              e.preventDefault();
+            }
+          });
+
+          countInput.addEventListener('paste', (e) => {
+            const pastedText = e.clipboardData.getData('text').trim();
+
+            if (!/^\d+$/.test(pastedText)) {
+              e.preventDefault();
+            }
+          });
+
+          countInput.addEventListener('input', () => {
+            if (
+              countInput.value !== '' &&
+              parseInt(countInput.value, 10) < 0
+            
+            ) {
+              countInput.value = '0';
+            }
+          });
+
+
+
+          document.querySelectorAll('input[type="number"]').forEach(input => {
+            let previousValue = input.value;
+
+            input.addEventListener('focus', () => {
+              previousValue = input.value;
+            });
+
+            input.addEventListener('blur', () => {
+              if (input.value.trim() === '') {
+                input.value = previousValue;
+              }
+            });
+          });
+
           // Add a cache-busting timestamp to force fresh settings retrieval:
           fetch('/getSettings?t=' + new Date().getTime())
           .then(response => response.json())
           .then(data => {
               document.getElementById('frequency').value = data.cw_freq;
               document.getElementById('freqUnit').value = data.cw_unit;
+              document.getElementById('freqUnit').dataset.lastUnit = data.cw_unit;
               document.getElementById('amplitude').value = data.cw_amp;
               document.getElementById('filterSelect').value = data.filt;
+              document.getElementById('sw_filterSelect').value = data.filt;
               
               document.getElementById('sw_start').value = data.sw_start;
               document.getElementById('sw_start_unit').value = data.sw_start_u;
@@ -1078,6 +1482,9 @@ String getHTML() {
               document.getElementById('sw_stop_unit').value = data.sw_stop_u;
               document.getElementById('sw_step').value = data.sw_step;
               document.getElementById('sw_step_unit').value = data.sw_step_u;
+              document.getElementById('sw_start_unit').dataset.lastUnit = data.sw_start_u;
+              document.getElementById('sw_stop_unit').dataset.lastUnit = data.sw_stop_u;
+              document.getElementById('sw_step_unit').dataset.lastUnit = data.sw_step_u;
               document.getElementById('sw_dwell').value = data.sw_dwell;
               document.getElementById('sw_att').value = data.sw_amp;
               document.getElementById('sw_type').value = data.sw_type;
@@ -1143,10 +1550,49 @@ String getHTML() {
           if(unit === 'GHz') return hz / 1e9;
           return hz;
       }
+      
       function setPreset(target, val, unit) {
-          document.getElementById(target).value = val;
-          document.getElementById(target + '_unit').value = unit;
+        document.getElementById(target).value = val;
+
+        const unitSelect = document.getElementById(target + '_unit');
+        unitSelect.value = unit;
+        unitSelect.dataset.lastUnit = unit;
       }
+
+      function setupUnitConversion(valueId, unitId) {
+        const input = document.getElementById(valueId);
+        const unitSelect = document.getElementById(unitId);
+
+        unitSelect.dataset.lastUnit = unitSelect.value;
+
+        unitSelect.addEventListener('change', () => {
+          const oldUnit = unitSelect.dataset.lastUnit;
+          const newUnit = unitSelect.value;
+          const value = parseFloat(input.value);
+
+          if (!isNaN(value)) {
+            const hz = getHz(value, oldUnit);
+            const convertedValue = fromHz(hz, newUnit);
+
+            input.value = parseFloat(convertedValue.toFixed(9));
+          }
+
+          unitSelect.dataset.lastUnit = newUnit;
+        });
+      }
+
+      setupUnitConversion('frequency', 'freqUnit');
+
+      setupUnitConversion('step_val', 'stepUnit');
+
+      setupUnitConversion('sw_start', 'sw_start_unit');
+
+      setupUnitConversion('sw_stop', 'sw_stop_unit');
+
+      setupUnitConversion('sw_step', 'sw_step_unit');
+
+
+
 
       // --- CW LOGIC ---
       document.getElementById('btn_plus').addEventListener('click', () => {
@@ -1157,7 +1603,7 @@ String getHTML() {
           
           let fHz = getHz(fVal, fUnit);
           let sHz = getHz(sVal, sUnit);
-          document.getElementById('frequency').value = parseFloat(fromHz(fHz + sHz, fUnit).toFixed(3));
+          document.getElementById('frequency').value = parseFloat(fromHz(fHz + sHz, fUnit).toPrecision(15));
       });
 
       document.getElementById('btn_minus').addEventListener('click', () => {
@@ -1170,13 +1616,13 @@ String getHTML() {
           let sHz = getHz(sVal, sUnit);
           let newHz = fHz - sHz;
           if(newHz < 0) newHz = 0;
-          document.getElementById('frequency').value = parseFloat(fromHz(newHz, fUnit).toFixed(3));
+          document.getElementById('frequency').value = parseFloat(fromHz(newHz, fUnit).toPrecision(15));
       });
 
       document.getElementById('applyCW').addEventListener('click', () => {
           const btn = document.getElementById('applyCW');
           const originalColor = btn.style.backgroundColor;
-          
+    
           const freq = document.getElementById('frequency').value;
           const unit = document.getElementById('freqUnit').value;
           const att = document.getElementById('amplitude').value;
@@ -1193,30 +1639,55 @@ String getHTML() {
           })
           .then(response => response.text())
           .then(data => {
+
+              // Read back the ACTUAL values applied by the DSG.
+              return fetch('/getSettings?t=' + new Date().getTime());
+          })
+          .then(response => response.json())
+          .then(settings => {
+
+              // Update the browser with the real device state.
+              document.getElementById('frequency').value = settings.cw_freq;
+              document.getElementById('freqUnit').value = settings.cw_unit;
+              document.getElementById('freqUnit').dataset.lastUnit = settings.cw_unit;
+              document.getElementById('amplitude').value = settings.cw_amp;
+              document.getElementById('filterSelect').value = settings.filt;
+
               btn.style.backgroundColor = "#a6e3a1";
-              
+
               document.getElementById('btn_sweep_toggle').style.backgroundColor = "#a6e3a1";
-              // Fix: button text markup was cleaned up.
               document.getElementById('btn_sweep_toggle').innerHTML = "&#9654; START SWEEP";
 
-              setTimeout(() => { btn.style.backgroundColor = originalColor; }, 1000);
-          });
+              setTimeout(() => {
+                  btn.style.backgroundColor = originalColor;
+              }, 1000);
+          })
+          .catch(err => console.log("CW sync failed:", err));
       });
 
       document.getElementById('btn_rf').addEventListener('click', () => {
+
           fetch('/toggleRFOutput', { method: 'POST' })
           .then(response => response.text())
-          .then(state => {
+          .then(() => {
+              return fetch('/getSettings?t=' + new Date().getTime());
+          })
+          .then(response => response.json())
+          .then(settings => {
+
               const btn = document.getElementById('btn_rf');
-              if(state === "1") {
+
+              if (settings.rf_out == 1) {
                   btn.style.backgroundColor = "#a6e3a1";
                   btn.innerText = "RF OUTPUT: ON";
               } else {
                   btn.style.backgroundColor = "#f38ba8";
                   btn.innerText = "RF OUTPUT: OFF";
               }
-          });
-      });
+          })
+    .catch(err => console.log("RF sync failed:", err));
+});
+
 
       // --- SWEEP LOGIC ---
       document.getElementById('applySweep').addEventListener('click', () => {
@@ -1235,23 +1706,52 @@ String getHTML() {
             return;
           }
 
+          const startHz = getHz(parseFloat(start), start_u);
+          const stopHz = getHz(parseFloat(stop), stop_u);
+
+          if (startHz > stopHz) {
+            alert("Start frequency cannot be greater than Stop frequency.");
+            return;
+          }
+
+          if (startHz === stopHz) {
+            alert("Start frequency cannot be equal to Stop frequency.");
+            return;
+            }
+
+
           const step = document.getElementById('sw_step').value;
           const step_u = document.getElementById('sw_step_unit').value;
           const dwell = document.getElementById('sw_dwell').value;
           const att = document.getElementById('sw_att').value;
+          const filt = document.getElementById('sw_filterSelect').value;
           const type = document.getElementById('sw_type').value;
           const count = document.getElementById('sw_count').value;
 
           fetch('/applySweep', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: `start=${start}&start_u=${start_u}&stop=${stop}&stop_u=${stop_u}&step=${step}&step_u=${step_u}&dwell=${dwell}&att=${att}&type=${type}&count=${count}`
-          })
-          .then(response => response.text())
-          .then(data => {
-              btn.style.backgroundColor = "#a6e3a1";
-              setTimeout(() => { btn.style.backgroundColor = originalColor; }, 1000);
-          });
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `start=${start}&start_u=${start_u}&stop=${stop}&stop_u=${stop_u}&step=${step}&step_u=${step_u}&dwell=${dwell}&att=${att}&filt=${filt}&type=${type}&count=${count}`
+      })
+      .then(response => response.text())
+      .then(() => {
+
+          // Read back the ACTUAL Sweep values applied by the DSG.
+          return fetch('/getSettings?t=' + new Date().getTime());
+      })
+      .then(response => response.json())
+      .then(settings => {
+
+          // Show the real power allowed for the complete Sweep range.
+          document.getElementById('sw_att').value = settings.sw_amp;
+
+          btn.style.backgroundColor = "#a6e3a1";
+
+          setTimeout(() => {
+             btn.style.backgroundColor = originalColor;
+         }, 1000);
+      })
+      .catch(err => console.log("Sweep sync failed:", err));
       });
 
       document.getElementById('btn_sweep_toggle').addEventListener('click', () => {
@@ -1274,6 +1774,27 @@ String getHTML() {
               }
           });
       });
+
+      const powerInfoBtn = document.getElementById('powerInfoBtn');
+      const powerInfoPopup = document.getElementById('powerInfoPopup');
+
+      powerInfoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        powerInfoPopup.classList.toggle('show');
+      });
+
+      powerInfoPopup.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+
+      document.addEventListener('click', () => {
+        powerInfoPopup.classList.remove('show');
+      });
+
+           
+
+
+
 
       // TELEMETRY POLLING
       setInterval(() => {
@@ -1307,12 +1828,19 @@ String getHTML() {
               }
 
               const pll = document.getElementById('live_pll');
+              const cwPll = document.getElementById('cw_pll');
               if (data.lock === 1) {
                   pll.innerText = "LD Result: LOCKED";
                   pll.style.color = "#a6e3a1"; // Green
+
+                  cwPll.innerText = "LD Result: LOCKED";
+                  cwPll.style.color = "#a6e3a1";
               } else {
                   pll.innerText = "LD Result: UNLOCKED";
                   pll.style.color = "#f38ba8"; // Red
+
+                  cwPll.innerText = "LD Result: UNLOCKED";
+                  cwPll.style.color = "#f38ba8";
               }
           })
           .catch(err => console.log(err));
@@ -1453,9 +1981,13 @@ void handleApplyCW() {
     // Removed the previously unnecessary OUTP OFF and rfOutputEnabled = false behavior from this path.
 
     // Store the latest values so the device can retain them after restart.
-    currentFrequency = freq;
-    currentFreqUnit = unit;
-    currentAmplitude = att;
+    extern String FreqValueForMainMenu;
+    extern String FreqUnitForMainMenu;
+    extern String AmpValueForMainMenu;
+
+    currentFrequency = FreqValueForMainMenu;
+    currentFreqUnit = FreqUnitForMainMenu;
+    currentAmplitude = AmpValueForMainMenu;
 
     server.send(200, "text/plain", "CW Settings Applied");
 }
@@ -1476,12 +2008,18 @@ void handleApplySweep() {
     String step_u = server.arg("step_u");
     String dwell = server.arg("dwell");
     String att = server.arg("att");
+    String filt = server.arg("filt");
     String type = server.arg("type");
     String count = server.arg("count");
 
     // 2. Convert all sweep parameters into SCPI-style commands and pass them to the system.
+
+    String cmdFilt = String("FILT ") + (filt == "1" ? "ON" : "OFF");
+    RC_HandleLine((char*)cmdFilt.c_str());
+
     String cmdStart = "SWEEP:STAR " + start + start_u;
     RC_HandleLine((char*)cmdStart.c_str());
+
 
     String cmdStop = "SWEEP:STOP " + stop + stop_u;
     RC_HandleLine((char*)cmdStop.c_str());
@@ -1622,12 +2160,12 @@ void loop() {
   if (isSweepRunning && currentMenu == SWEEP_MENU)
   {
      RunSweep();
-     //server.handleClient(); 
+     server.handleClient(); 
      return; 
   }
   
- // server.handleClient();
- // manageWiFiConnection();
+  server.handleClient();
+  manageWiFiConnection();
   
   if (currentTime - lastUpdateTime2 >= 500)
   {
