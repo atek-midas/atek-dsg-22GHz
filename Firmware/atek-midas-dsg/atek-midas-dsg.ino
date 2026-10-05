@@ -595,6 +595,16 @@ void handleToggleRFOutput() {
 String wifiSSID;
 String wifiPassword;
 
+// --------------------------------------------------------------
+// Wi-Fi feature switch
+// true  = Wi-Fi + Web Interface enabled
+// false = Wi-Fi completely disabled
+// --------------------------------------------------------------
+constexpr bool WIFI_ENABLED = false;
+
+
+
+
 void readWiFiCredentials() {
   preferences.begin("WifiSettings", false);
   wifiSSID = preferences.getString("ssid", "");
@@ -748,6 +758,13 @@ Lmx2820SetFreqinMHz(startupFreqMHz, 10000000, FilterStatus);
   snprintf(cmdBuf, sizeof(cmdBuf), "POW:LEV %s", currentAmplitude.c_str());
   RC_HandleLine(cmdBuf);
 
+  if (!WIFI_ENABLED)
+  {
+    WiFi.mode(WIFI_OFF);
+    SetWifiStatus(WIFI_STATUS_OFF);
+    ConnectionStatus("Wi-Fi Disabled", true);
+  }
+
 }
 
 // --------------------------------------------------------------
@@ -812,6 +829,9 @@ void WiFiTask(void *parameter) {
 
 void InitServer()
 {
+  if (!WIFI_ENABLED)
+   return;
+
   server.on("/", handleRoot); 
   server.on("/save", handleSave);
   server.on("/applyCW", handleApplyCW);
@@ -2072,7 +2092,10 @@ void handleToggleSweep() {
 // Attempts stored Wi-Fi credentials first, then falls back to hotspot mode.
 // --------------------------------------------------------------
 void manageWiFiConnection() {
+  if (!WIFI_ENABLED)
+   return;
   static unsigned long lastCheckTime = 0;
+  
   switch (wifiState) {
     case WIFI_INIT:
       readWiFiCredentials();
@@ -2160,13 +2183,20 @@ void loop() {
   if (isSweepRunning && currentMenu == SWEEP_MENU)
   {
      RunSweep();
-     server.handleClient(); 
+      if (WIFI_ENABLED)
+      {
+        server.handleClient();
+      }
+     
      return; 
   }
   
-  server.handleClient();
-  manageWiFiConnection();
-  
+  if (WIFI_ENABLED)
+  {
+   server.handleClient();
+   manageWiFiConnection();
+  }
+
   if (currentTime - lastUpdateTime2 >= 500)
   {
     lastUpdateTime2 = currentTime;
