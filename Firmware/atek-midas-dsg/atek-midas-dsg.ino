@@ -601,7 +601,7 @@ String wifiPassword;
 // true  = Wi-Fi + Web Interface enabled
 // false = Wi-Fi completely disabled
 // --------------------------------------------------------------
-constexpr bool WIFI_ENABLED = true;
+constexpr bool WIFI_ENABLED = false;
 
 
 // --------------------------------------------------------------
