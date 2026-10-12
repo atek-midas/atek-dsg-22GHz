@@ -240,3 +240,52 @@ Firmware: --
 ```
 
 when no firmware build information is available. After connecting and synchronizing with the DSG, it is updated with the firmware build information reported by the device.
+
+---
+
+## Python API (`dsg_api.py`)
+
+All remote commands of the DSG are implemented in [`ui/dsg_api.py`](ui/dsg_api.py). The desktop UI uses this file for every device operation, and it can also be used on its own to control the DSG from your own Python scripts (only `pyserial` is required).
+
+```python
+from dsg_api import DSG
+
+with DSG("COM5") as dsg:               # use your DSG's serial port
+    print(dsg.identify())               # DSG,DSG-22.6GHz,0,r1.0
+
+    # CW output
+    dsg.set_display_menu("CW")
+    dsg.set_frequency(2.4, "GHz")
+    dsg.set_filter(False)               # set the filter before the power level
+    dsg.set_power_level(0)              # dBm
+    dsg.set_rf_output(True)
+
+    print(dsg.read_telemetry())         # current, voltage, power, temperature, PLL lock
+    dsg.set_rf_output(False)
+
+    # Sweep
+    dsg.set_display_menu("SWP")
+    dsg.set_sweep_start(1, "GHz")
+    dsg.set_sweep_stop(2, "GHz")
+    dsg.set_sweep_step(10, "MHz")
+    dsg.set_sweep_dwell(1)              # ms
+    dsg.set_sweep_count(1)              # 0 = run until aborted
+    dsg.set_sweep_power(0)              # dBm
+    dsg.set_sweep_type("LIN")
+    dsg.start_sweep()
+```
+
+| Group | Methods |
+|---|---|
+| Connection | `DSG(port)`, `close()`, `is_open()`, `with DSG(port) as dsg:` |
+| Identification | `identify()` |
+| Display | `set_display_menu("CW" / "SWP")`, `get_display_menu()` |
+| CW output | `set_frequency(value, unit)`, `get_frequency()`, `set_power_level(dbm)`, `get_power_level()`, `set_filter(on)`, `get_filter()`, `set_rf_output(on)`, `get_rf_output()` |
+| Sweep | `set_sweep_start / stop / step(value, unit)`, `set_sweep_dwell(ms)`, `set_sweep_count(n)`, `set_sweep_power(dbm)`, `set_sweep_type("LIN" / "LOG")`, `start_sweep()`, `abort_sweep()` |
+| Telemetry | `read_telemetry()`, `read_current()`, `read_voltage()`, `read_temperature()`, `is_pll_locked()`, `read_adc(channel)` |
+| Device state | `get_settings()` (all CW/sweep settings as a dict) |
+| Calibration | `set_serial_number(sn)`, `get_serial_number()`, `clear_calibration()`, `add_calibration_point(...)`, `save_calibration()`, `clear_high_power_calibration()`, `add_high_power_calibration_point(...)`, `save_high_power_calibration()` |
+| Advanced | `set_attenuator(db)`, `set_pll_output_power(level, output)`, `read_pll_register(reg)`, `write_pll_register(reg, value)`, `read_io_expander(reg)`, `write_io_expander(reg, value)` |
+| Raw SCPI | `command(cmd, expected="0")`, `query(cmd)`, `write(cmd)` |
+
+Frequency units are `"Hz"`, `"KHz"`, `"MHz"` and `"GHz"`. Setter methods return `True` when the device acknowledges the command. Device messages that are not command replies, such as error messages (`-222,Data out of range`) or sweep progress lines, are passed to the optional `message_handler` function given to `DSG(port, message_handler=print)`.

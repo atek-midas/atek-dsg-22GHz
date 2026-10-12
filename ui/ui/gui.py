@@ -14,7 +14,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 import serial.tools.list_ports
 
-from DSG_Remote import DSG_Remote
+from dsg_api import DSG
 
 try:
     from assets import ASSETS
@@ -619,10 +619,11 @@ class GroupBox(ctk.CTkFrame):
 
 # -----------------------------------------------------------------------------
 # Background communication thread
-# Handles serial communication with the DSG device without blocking the GUI.
-# It sends queued SCPI-like commands, reads device responses, and posts events
-# (logs, telemetry, connection status, UI sync) to a thread-safe queue that the
-# GUI polls from the Tk main loop.
+# Handles communication with the DSG device without blocking the GUI.
+# It runs queued dsg_api.DSG method calls, reads device messages, and posts
+# events (logs, telemetry, connection status, UI sync) to a thread-safe queue
+# that the GUI polls from the Tk main loop. All device commands live in
+# dsg_api.py; this class only decides when to run them.
 # -----------------------------------------------------------------------------
 class ScpiWorker:
     def __init__(self, events: "queue.Queue"):
@@ -650,8 +651,9 @@ class ScpiWorker:
         if self._thread is not None:
             self._thread.join()
 
-    def send_cmd(self, cmd):
-        self.cmd_queue.append(cmd)
+    def call(self, method, *args):
+        """Queue a dsg_api.DSG method call, e.g. call("set_frequency", 2.4, "GHz")."""
+        self.cmd_queue.append((method, args))
 
     def request_sync(self):
         self._sync_requested = True
@@ -659,7 +661,7 @@ class ScpiWorker:
     def abort_sweep_urgent(self):
         self.is_sweeping = False
         if hasattr(self, 'dsg') and self.dsg.is_open():
-            self.dsg.SweepAbortUrgent()
+            self.dsg.abort_sweep()
 
     def process_rx(self, resp):
         if not resp or resp == "0":
@@ -683,32 +685,16 @@ class ScpiWorker:
         if resp.startswith("-"):
             self._emit("log", f"⚠ Device Message: {resp}")
 
-    # -------------------------------------------------------------------------
-    # ADC sampling helper
-    # Performs one dummy read, then averages three ADC readings to reduce noise.
-    # -------------------------------------------------------------------------
-    def get_stable_adc(self, channel: int) -> float:
-        if not hasattr(self, 'dsg') or not self.dsg.is_open():
-            return 0.0
-
-        self.dsg.ADCRead(channel)
-        time.sleep(0.01)
-
-        val1 = self.dsg.ADCRead(channel)
-        val2 = self.dsg.ADCRead(channel)
-        val3 = self.dsg.ADCRead(channel)
-
-        return (val1 + val2 + val3) / 3.0
-
     def run(self):
         try:
-            self.dsg = DSG_Remote(self.port)
+            # Lines that are not command replies (errors, sweep progress) go to process_rx.
+            self.dsg = DSG(self.port, message_handler=self.process_rx)
             self.running = True
             self._emit("connection", True)
             self._emit("log", f"[SYS] Successfully connected to port {self.port}.")
             # --- REQUEST CURRENT DEVICE SCREEN SETTINGS AND SEND THEM TO THE GUI ---
             time.sleep(0.2)
-            settings = self.dsg.GetSyncSettings()
+            settings = self.dsg.get_settings()
             if settings:
                 self._emit("sync", settings)
             # ------------------------------------------------
@@ -718,31 +704,15 @@ class ScpiWorker:
             # Main worker loop: process queued commands, update telemetry, and read device messages.
             while self.running:
                 while self.cmd_queue:
-                    cmd = self.cmd_queue.popleft()
-                    self.dsg._write(cmd)
-
-                    # --- COMMAND ACKNOWLEDGMENT / HANDSHAKE LOGIC ---
-                    # Wait up to 0.5 seconds for the '0' (OK) response from the ESP32.
-                    t0 = time.time()
-                    ack = False
-                    while time.time() - t0 < 0.5:
-                        if self.dsg.in_waiting() > 0:
-                            resp = self.dsg.read_line()
-                            if resp == "0":
-                                ack = True
-                                break
-                            self.process_rx(resp)  # Display any non-OK response, such as device error messages.
-                        time.sleep(0.005)
-
-                    # Add a short delay if the device does not acknowledge the command in time.
-                    if not ack:
-                        time.sleep(0.05)
+                    method, args = self.cmd_queue.popleft()
+                    # Each DSG method waits for the device acknowledgment itself.
+                    getattr(self.dsg, method)(*args)
 
                 if self._sync_requested and not self.cmd_queue:
                     self._sync_requested = False
 
                     try:
-                        settings = self.dsg.GetSyncSettings()
+                        settings = self.dsg.get_settings()
 
                         if settings:
                             self._emit("sync", settings)
@@ -752,16 +722,8 @@ class ScpiWorker:
 
                 # Periodic telemetry polling is disabled during sweep mode to avoid disturbing timing.
                 if not self.is_sweeping and time.time() - last_telemetry_time > 1.5 and not self.cmd_queue:
-                    telemetry = {}
                     try:
-                        telemetry["CURR"] = str(self.get_stable_adc(3))
-                        telemetry["TEMP"] = str(self.get_stable_adc(4))
-                        telemetry["VOLT"] = str(self.get_stable_adc(2))
-
-                        pll_val = self.dsg.PLLRead(74)
-                        telemetry["PLL"] = hex(pll_val)
-
-                        self._emit("telemetry", telemetry)
+                        self._emit("telemetry", self.dsg.read_telemetry())
                     except Exception:
                         pass
                     last_telemetry_time = time.time()
@@ -1348,12 +1310,12 @@ class DSGMainWindow(ctk.CTk):
         if not self.validate_frequency(self.spin_freq.value(), self.combo_unit.get()):
             return
 
-        self.worker.send_cmd(":DISP:MENU CW")
-        self.worker.send_cmd(f":FREQ {self.spin_freq.value()}{self.combo_unit.get()}")
+        self.worker.call("set_display_menu", "CW")
+        self.worker.call("set_frequency", self.spin_freq.value(), self.combo_unit.get())
 
         # Send the filter setting first so the power calculation logic can use the correct state.
-        self.worker.send_cmd(f":FILT {'ON' if self.combo_filt.index() == 1 else 'OFF'}")
-        self.worker.send_cmd(f":POW:LEV {self.spin_att.value()}")
+        self.worker.call("set_filter", self.combo_filt.index() == 1)
+        self.worker.call("set_power_level", self.spin_att.value())
 
         # Read back the actual Target Power applied by the DSG.
         self.worker.request_sync()
@@ -1366,12 +1328,10 @@ class DSGMainWindow(ctk.CTk):
         self.rf_state = not self.rf_state
 
         if self.rf_state:
-            self.worker.send_cmd(":OUTP ON")
-            self.worker.send_cmd(
-                f":FREQ {self.spin_freq.value()}{self.combo_unit.get()}"
-            )
+            self.worker.call("set_rf_output", True)
+            self.worker.call("set_frequency", self.spin_freq.value(), self.combo_unit.get())
         else:
-            self.worker.send_cmd(":OUTP OFF")
+            self.worker.call("set_rf_output", False)
 
         self._style_rf(
             "ON" if self.rf_state else "OFF",
@@ -1403,17 +1363,17 @@ class DSGMainWindow(ctk.CTk):
             )
             return
 
-        self.worker.send_cmd(":DISP:MENU SWP")
-        self.worker.send_cmd(f":FILT {'ON' if self.sw_filt.index() == 1 else 'OFF'}")
+        self.worker.call("set_display_menu", "SWP")
+        self.worker.call("set_filter", self.sw_filt.index() == 1)
 
-        self.worker.send_cmd(f":SWEEP:STAR {self.sw_start.value()}{self.sw_start_u.get()}")
-        self.worker.send_cmd(f":SWEEP:STOP {self.sw_stop.value()}{self.sw_stop_u.get()}")
-        self.worker.send_cmd(f":SWEEP:STEP {self.sw_step.value()}{self.sw_step_u.get()}")
-        self.worker.send_cmd(f":SWEEP:DWEL {self.sw_dwell.value()}")
-        self.worker.send_cmd(f":SWEEP:COUN {self.sw_count.value()}")
-        self.worker.send_cmd(f":SWEEP:POW {self.sw_pow.value()}")
+        self.worker.call("set_sweep_start", self.sw_start.value(), self.sw_start_u.get())
+        self.worker.call("set_sweep_stop", self.sw_stop.value(), self.sw_stop_u.get())
+        self.worker.call("set_sweep_step", self.sw_step.value(), self.sw_step_u.get())
+        self.worker.call("set_sweep_dwell", self.sw_dwell.value())
+        self.worker.call("set_sweep_count", self.sw_count.value())
+        self.worker.call("set_sweep_power", self.sw_pow.value())
         t_type = "LIN" if self.sw_type.index() == 0 else "LOG"
-        self.worker.send_cmd(f":SWEEP:TYPE {t_type}")
+        self.worker.call("set_sweep_type", t_type)
 
         # Read back the actual Target Power allowed for the complete Sweep range.
         self.worker.request_sync()
@@ -1430,8 +1390,8 @@ class DSGMainWindow(ctk.CTk):
     def start_sweep(self):
         self.worker.is_sweeping = True
         self.sw_filt.set_enabled(False)
-        self.worker.send_cmd(":DISP:MENU SWP")
-        self.worker.send_cmd(":SWEEP:INIT")
+        self.worker.call("set_display_menu", "SWP")
+        self.worker.call("start_sweep")
 
         self._style_sweep_button(True)
         self._style_rf("SWEEP MODE", COLOR_WARNING)
@@ -1468,28 +1428,22 @@ class DSGMainWindow(ctk.CTk):
             current_val = None
             voltage_val = None
 
-            if "CURR" in data:
-                current_val = float(data["CURR"])
+            if "current_a" in data:
+                current_val = data["current_a"]
                 self.lbl_curr.configure(text=f"Current: {current_val:.2f} A")
 
-            if "VOLT" in data:
-                raw_volt = float(data["VOLT"])
-                voltage_val = raw_volt * 2.0
+            if "voltage_v" in data:
+                voltage_val = data["voltage_v"]
                 self.lbl_volt.configure(text=f"Voltage: {voltage_val:.2f} V")
 
             if current_val is not None and voltage_val is not None:
-                power_w = current_val * voltage_val
-                self.lbl_power.configure(text=f"Power: {power_w:.2f} W")
+                self.lbl_power.configure(text=f"Power: {data['power_w']:.2f} W")
 
-            if "TEMP" in data:
-                v = float(data["TEMP"])
-                temp_c = (v - 0.5) * 100.0
-                self.lbl_temp.configure(text=f"Temperature: {temp_c:.1f} C")
+            if "temperature_c" in data:
+                self.lbl_temp.configure(text=f"Temperature: {data['temperature_c']:.1f} C")
 
-            if "PLL" in data:
-                val = int(data["PLL"], 16)
-                rb_ld = (val >> 14) & 0x03
-                if rb_ld == 2:
+            if "pll_locked" in data:
+                if data["pll_locked"]:
                     self._set_pll_state("LD Result: LOCKED", COLOR_SUCCESS)
                 else:
                     self._set_pll_state("LD Result: UNLOCKED", COLOR_ERROR)
@@ -1605,8 +1559,8 @@ class DSGMainWindow(ctk.CTk):
     def _upload_normal_calibration(self, lines, device_serial):
         self.append_log("[CAL] Loading NORMAL calibration...")
 
-        self.worker.send_cmd(f":CAL:SER {device_serial}")
-        self.worker.send_cmd(":CAL:CLEAR")
+        self.worker.call("set_serial_number", device_serial)
+        self.worker.call("clear_calibration")
 
         success_count = 0
 
@@ -1642,18 +1596,10 @@ class DSGMainWindow(ctk.CTk):
                     att3_off = self._parse_normal_val(cols[9], False, freq)
                     attn3_off = self._parse_normal_val(cols[11], False, freq)
 
-                cmd = (
-                    f":CAL:DATA "
-                    f"{freq},"
-                    f"{att6_on},"
-                    f"{att3_on},"
-                    f"{attn3_on},"
-                    f"{att6_off},"
-                    f"{att3_off},"
-                    f"{attn3_off}"
+                self.worker.call(
+                    "add_calibration_point",
+                    freq, att6_on, att3_on, attn3_on, att6_off, att3_off, attn3_off
                 )
-
-                self.worker.send_cmd(cmd)
 
                 # --- SERIAL BUFFER PROTECTION DELAY ---
                 if i % 10 == 0:
@@ -1666,7 +1612,7 @@ class DSGMainWindow(ctk.CTk):
 
         time.sleep(0.1)
 
-        self.worker.send_cmd(":CAL:SAVE")
+        self.worker.call("save_calibration")
 
         self.append_log(
             f"[CAL] NORMAL calibration transfer complete. "
@@ -1701,11 +1647,11 @@ class DSGMainWindow(ctk.CTk):
         self.append_log("[HPCAL] Loading HIGH POWER calibration...")
 
         # Keep device serial synchronized.
-        self.worker.send_cmd(f":CAL:SER {device_serial}")
+        self.worker.call("set_serial_number", device_serial)
 
         # Clears ONLY the High Power RAM table.
         # Normal calibration is untouched.
-        self.worker.send_cmd(":HPCAL:CLEAR")
+        self.worker.call("clear_high_power_calibration")
 
         success_count = 0
 
@@ -1749,23 +1695,11 @@ class DSGMainWindow(ctk.CTk):
                 att17_off = self._parse_hp_val(cols[10])
                 att18_off = self._parse_hp_val(cols[11])
 
-                cmd = (
-                    f":HPCAL:DATA "
-                    f"{freq},"
-                    f"{att8_on},"
-                    f"{att9_on},"
-                    f"{att10_on},"
-                    f"{att11_on},"
-                    f"{att12_on},"
-                    f"{att13_off},"
-                    f"{att14_off},"
-                    f"{att15_off},"
-                    f"{att16_off},"
-                    f"{att17_off},"
-                    f"{att18_off}"
+                self.worker.call(
+                    "add_high_power_calibration_point",
+                    freq, att8_on, att9_on, att10_on, att11_on, att12_on,
+                    att13_off, att14_off, att15_off, att16_off, att17_off, att18_off
                 )
-
-                self.worker.send_cmd(cmd)
 
                 # Same serial-buffer protection used by normal calibration.
                 if i % 10 == 0:
@@ -1778,7 +1712,7 @@ class DSGMainWindow(ctk.CTk):
 
         time.sleep(0.1)
 
-        self.worker.send_cmd(":HPCAL:SAVE")
+        self.worker.call("save_high_power_calibration")
 
         self.append_log(
             f"[HPCAL] HIGH POWER calibration transfer complete. "
