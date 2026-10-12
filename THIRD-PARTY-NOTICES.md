@@ -8,7 +8,7 @@ license terms and are not relicensed under the ATEK DSG MIT License.
 
 Third-party software used by the DSG desktop application is documented in:
 
-`UI/THIRD-PARTY-NOTICES.md`
+`ui/THIRD-PARTY-NOTICES.md`
 
 ## Other Project Components
 

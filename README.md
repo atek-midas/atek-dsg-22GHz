@@ -205,7 +205,7 @@ Tap the circular touch button on the right side of the display frame to switch t
 7. Use the **CW** tab for a fixed-frequency signal, or the **Sweep** tab to scan across a frequency range.
 8. Monitor live device telemetry in the **Device Screen (Live)** panel and diagnostic messages in **System Logs**.
 
-For detailed desktop UI installation and usage instructions, see [`UI/readme.md`](UI/readme.md).
+For detailed desktop UI installation and usage instructions, see [`ui/readme.md`](ui/readme.md).
 
 
 ## Demonstration Video

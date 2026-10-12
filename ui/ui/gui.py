@@ -207,7 +207,7 @@ class AboutWindow(ctk.CTkToplevel):
         make_button(
             btn_row,
             "Third-Party Notices",
-            lambda: open_file_or_repo_page("THIRD-PARTY-NOTICES.md"),
+            lambda: open_file_or_repo_page("../THIRD-PARTY-NOTICES.md"),
             width=170,
             height=32
         ).pack(side="left", padx=5)
@@ -794,7 +794,7 @@ class ScpiWorker:
 class DSGMainWindow(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=COLOR_BG)
-        self.title("DSG 22.6 GHz - Professional Control Center")
+        self.title("DSG 22.6 GHz - Control Psnel")
         self.geometry("1200x780")
         self.minsize(1100, 700)
 

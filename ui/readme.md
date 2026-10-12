@@ -15,7 +15,7 @@ The current desktop UI version is **1.0.0** and is implemented with **CustomTkin
 1. Clone or download this repository.
 2. Navigate to the UI source folder:
    ```bash
-   cd UI
+   cd ui
    ```
    *(adjust this path to match the actual folder name in this repo)*
 3. (Recommended) Create and activate a virtual environment:
