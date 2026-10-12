@@ -721,6 +721,21 @@ void handleSave() {
   }
 }
 
+// Removes the stored Wi-Fi credentials and restarts.
+// With no credentials stored, the device starts directly in hotspot mode.
+void handleEraseWiFi() {
+  preferences.begin("WifiSettings", false);
+  preferences.clear();
+  preferences.end();
+
+  wifiSSID = "";
+  wifiPassword = "";
+
+  server.send(200, "text/plain; charset=utf-8", "Credentials erased. Restarting...");
+  delay(1000);
+  ESP.restart();
+}
+
 enum WiFiState {
   WIFI_INIT,
   WIFI_CONNECTING,
@@ -920,8 +935,9 @@ void InitServer()
   if (!WIFI_ENABLED)
    return;
 
-  server.on("/", handleRoot); 
+  server.on("/", handleRoot);
   server.on("/save", handleSave);
+  server.on("/eraseWifi", HTTP_POST, handleEraseWiFi);
   server.on("/applyCW", handleApplyCW);
   server.on("/applySweep", handleApplySweep); 
   server.on("/toggleRFOutput", handleToggleRFOutput);
@@ -1386,6 +1402,7 @@ String getHTML() {
       <label>Password:</label>
       <input type="password" id="password" name="password" style="width:100%; margin-bottom:10px;">
       <button class="wide-button" id="save-credentials" style="background-color:#a6e3a1;">Save Credentials</button>
+      <button class="wide-button" id="erase-credentials" style="background-color:#f38ba8; margin-top:10px;">Erase Credentials</button>
     </div>
 
     <script>
@@ -1961,9 +1978,19 @@ String getHTML() {
         await fetch('/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `ssid=${ssid}&password=${password}`
+          // URLSearchParams encodes characters such as & + % # and spaces
+          body: new URLSearchParams({ ssid: ssid, password: password }).toString()
         });
         button.innerText = "Saved! Restarting...";
+      });
+
+      document.getElementById('erase-credentials').addEventListener('click', async () => {
+        if (!confirm("Erase the stored Wi-Fi credentials? The device will restart in hotspot mode.")) {
+          return;
+        }
+        const button = document.getElementById('erase-credentials');
+        await fetch('/eraseWifi', { method: 'POST' });
+        button.innerText = "Erased! Restarting in hotspot mode...";
       });
     </script>
   </div>
