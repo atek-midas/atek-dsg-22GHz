@@ -1107,7 +1107,31 @@ void ConnectionStatus(const char* text, bool clearLine) {
   }
 }
 
+void ShowWiFiInfo(const char* text)
+{
+  if (currentMenu != MAIN_MENU)
+    return;
 
+  const int x = 191;
+  const int y = 151;
+  const int width = 107;
+  const int height = 18;
+
+  tft.fillRect(x, y, width, height, tft.color565(51, 51, 51));
+
+  tft.setTextColor(TFT_WHITE);
+  tft.setFreeFont(&FreeSans12pt7b);
+  tft.setTextSize(1);
+
+  // Use a smaller font if the generated password is too wide.
+  if (tft.textWidth(text) > width)
+  {
+    tft.setFreeFont(&FreeSansBold9pt7b);
+  }
+
+  tft.setCursor(x, y, 2);
+  tft.print(text);
+}
 
 
 bool getTouch(int& x, int& y) {

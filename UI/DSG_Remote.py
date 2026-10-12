@@ -92,16 +92,25 @@ class DSG_Remote:
         """Read the device's current live settings as a JSON object."""
         if not self.is_open():
             return None
+
         try:
+            import json
+
             self.ser.reset_input_buffer()
-            cmd = b":SYNC?\n"
-            self.ser.write(cmd)
-            time.sleep(0.05)
-            # Read the expected JSON-formatted response line.
-            resp = self.ser.readline().decode(errors='ignore').strip()
-            if resp and resp.startswith("{"):
-                import json
-                return json.loads(resp)
+            self.ser.write(b":SYNC?\n")
+
+            timeout_time = time.time() + 0.5
+
+            while time.time() < timeout_time:
+                if self.ser.in_waiting > 0:
+                    resp = self.ser.readline().decode(errors="ignore").strip()
+
+                    if resp.startswith("{"):
+                        return json.loads(resp)
+
+                time.sleep(0.005)
+
         except Exception:
             pass
+
         return None

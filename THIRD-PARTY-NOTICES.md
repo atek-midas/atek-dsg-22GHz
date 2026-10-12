@@ -1,88 +1,19 @@
 # Third-Party Software Notices
 
-The ATEK DSG project uses third-party open-source software
-components. These components are developed and maintained by
-their respective copyright holders and are not owned or developed
-by ATEK MIDAS.
+The ATEK DSG project may use third-party open-source software components.
+These components remain subject to their respective copyright notices and
+license terms and are not relicensed under the ATEK DSG MIT License.
 
-Each third-party component remains subject to its respective
-license and copyright notices.
+## Desktop User Interface
 
-## PyQt6
+Third-party software used by the DSG desktop application is documented in:
 
-PyQt6 is a Python binding for the Qt application framework,
-developed and maintained by Riverbank Computing Limited.
+`UI/THIRD-PARTY-NOTICES.md`
 
-License:
-GNU General Public License v3.0
+## Other Project Components
 
-PyQt6 is used by the DSG desktop UI as an external dependency.
+Third-party software used by other parts of the project remains subject to
+its respective upstream license terms and copyright notices.
 
-Website:
-https://www.riverbankcomputing.com/software/pyqt/
-
----
-
-## pySerial
-
-pySerial is a Python library providing serial port communication
-for Python applications.
-
-Copyright:
-Chris Liechti and contributors
-
-License:
-BSD-3-Clause
-
-pySerial is used by the DSG desktop UI as an external dependency.
-
-Website:
-https://github.com/pyserial/pyserial
-
----
-
-## esptool
-
-esptool is a Python-based utility for flashing, provisioning,
-and interacting with Espressif SoCs.
-
-Copyright:
-Espressif Systems and contributors
-
-License:
-GNU General Public License v2.0 or later (GPL-2.0-or-later)
-
-esptool is used by the DSG desktop UI as an external dependency
-for firmware update functionality.
-
-Website:
-https://github.com/espressif/esptool
-
----
-
-## Python Standard Library
-
-The DSG desktop UI also uses modules from the Python standard
-library, including:
-
-- sys
-- time
-- datetime
-- json
-
-These are part of the Python standard library and are not
-separately distributed as third-party dependencies by this project.
-
----
-
-## ATEK DSG Project Licensing
-
-The ATEK DSG project contains components released under different
-licenses:
-
-- Firmware: MIT License
-- Desktop UI: GNU General Public License v3.0
-- Third-party software: respective licenses listed above
-
-Third-party software is not covered by the ATEK DSG project license
-and remains subject to its original license terms.
+Additional notices are provided with the relevant project component where
+applicable.

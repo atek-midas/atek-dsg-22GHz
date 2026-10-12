@@ -43,6 +43,7 @@ void SetupDisplay();
 int FontHeight(int font);
 void setWifiStat(bool onOff);
 void ConnectionStatus(const char* text, bool clearLine);
+void ShowWiFiInfo(const char* text);
 void drawFreqA_AmpA(const char* freq, const char* amp, const char* unit);
 void drawFreqB_AmpB(const char* freqB, const char* ampB);
 void drawChannelA_SetOnOff(bool onOff);

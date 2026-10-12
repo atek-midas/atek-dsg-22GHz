@@ -1,16 +1,36 @@
 ![EditedForHackAday](https://github.com/user-attachments/assets/bad8766b-52ef-475a-b041-01a4b451d7ac)
 
+## EU and Non-EU Firmware Branches
+
+This repository provides separate firmware branches for EU and non-EU
+configurations because of the device's Wi-Fi functionality.
+
+- **EU firmware (`release/eu`)**  
+  Wi-Fi is disabled. Enabling Wi-Fi causes the product to operate as radio
+  equipment and introduces additional regulatory and conformity requirements
+  under the EU Radio Equipment Directive (RED) 2014/53/EU. The EU firmware
+  therefore keeps Wi-Fi disabled so that the released product configuration
+  remains within the intended EU conformity scope.
+
+- **Non-EU firmware (`release/non-eu`)**  
+  Wi-Fi is enabled, providing the DSG's wireless access point and web-interface
+  functionality for configurations where this feature is permitted and covered
+  by the applicable market requirements.
+
+The RF signal-generation functionality of the DSG is otherwise shared between
+the two firmware variants. The primary difference is whether the ESP32-S3 Wi-Fi
+functionality is enabled.
 
 ## Overview
 
 The **DSG-22.6 GHz** is a high-performance, portable RF signal generator.  
-It tunes continuously from **300 MHz up to 22.6 GHz with 1 Hz resolution**.  
+It tunes continuously from **150 MHz up to 22.6 GHz with 1 Hz resolution**.  
 
 Designed to be compact and cost-effective, it can be powered via USB and operated either in the lab or in the field.  
 
 The generator offers outstanding spectral performance:  
 - Harmonic suppression up to **40 dBc at 0 dBm output**  
-- Output power adjustable from **+15 dBm down to -50 dBm** in **1 dB steps**  
+- Output power is **frequency-, filter-, and calibration-dependent**; see the **Output Power** section below for the supported ranges.  
 - Fast frequency tuning in **100 µs**  
 - Built-in diagnostics for temperature, voltage/current monitoring, and PLL lock status  
 
@@ -20,7 +40,7 @@ The generator offers outstanding spectral performance:
 |-------------------|----------------------|
 | Frequency Range   | 0.15 GHz – 22.6 GHz |
 | Frequency Resolution | 1 Hz |
-| Output Power      | +20 dBm to -15 dBm, 1 dB steps |
+| Output Power      | Frequency-, filter-, and calibration-dependent; see the Output Power table below |
 | Sweep Mode        | Linear and logarithmic frequency sweep with adjustable start/stop, step size, and dwell time |
 | Harmonic Suppression | ≤ 40 dBc (at 0 dBm output) |
 | Reference Input   | 10 MHz external, SMA |
@@ -33,12 +53,19 @@ The generator offers outstanding spectral performance:
 |Open source         | Fully open hardware, firmware, and 3D models|
 
 ## Output Power
-| Output Type | Freq Range | Output Power |
+
+The maximum available output power depends on frequency, filter state, and the calibration data loaded for the device. The desktop UI automatically applies the highest available calibrated value when the requested Target Power is above the available limit.
+
+| Output Type | Frequency Range | Typical Maximum Target Power |
 | :--- | :--- | :--- |
-| **Filtered Output** | 2 - 18 GHz | 2 - 16 GHz Max 10 to 15 dBm |
-| | | 16 - 18 GHz Max 7 to 10 dBm |
-| **Unfiltered Output** | 0.15 - 22.6 GHz | 0.15 - 20 GHz Max 17 to 20 dBm |
-| | | 20 - 22.6 GHz Max 14 to 18 dBm |
+| **Filtered Output** | 2 - 8 GHz | Up to 12 dBm |
+| **Filtered Output** | 8 - 16 GHz | Up to 10 dBm |
+| **Filtered Output** | 16 - 18 GHz | Up to 10 dBm |
+| **Unfiltered Output** | 0.15 - 19 GHz | Up to 18 dBm |
+| **Unfiltered Output** | 19 - 21 GHz | Up to 17 dBm |
+| **Unfiltered Output** | 21 - 22.6 GHz | Up to 15 dBm |
+
+> The actual applied value can be lower if the device-specific calibration data does not support the requested level at a given frequency.
 
 ## Hardware & Power Requirements
 
@@ -160,13 +187,25 @@ Tap the circular touch button on the right side of the display frame to switch t
 
 ### Quick Start Summary
 
-1. Install the required libraries: `pip install -r requirements.txt`
-2. Connect the DSG to your PC via USB-C (USB-C end into the DSG).
-3. Run `python main_gui.py`.
-4. In the **Port** dropdown, click **REFRESH**, select the correct port, then click **CONNECT**.
-5. Click **LOAD CALIBRATION** and select the calibration file specific to your DSG unit.
-6. Use the **CW** tab for a fixed-frequency signal, or the **Sweep** tab to scan across a frequency range.
-7. Monitor live device telemetry in the **Device Screen (Live)** panel and diagnostic messages in **System Logs**.
+1. Connect the DSG to your PC via USB-C (USB-C end into the DSG).
+2. Navigate to the desktop UI folder:
+   ```bash
+   cd UI
+   ```
+3. Install the required libraries:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run the desktop application:
+   ```bash
+   python gui.py
+   ```
+5. In the **Port** dropdown, click **REFRESH**, select the correct port, then click **CONNECT**.
+6. Click **LOAD CALIBRATION** and select the calibration file specific to your DSG unit if required.
+7. Use the **CW** tab for a fixed-frequency signal, or the **Sweep** tab to scan across a frequency range.
+8. Monitor live device telemetry in the **Device Screen (Live)** panel and diagnostic messages in **System Logs**.
+
+For detailed desktop UI installation and usage instructions, see [`UI/readme.md`](UI/readme.md).
 
 
 ## Demonstration Video

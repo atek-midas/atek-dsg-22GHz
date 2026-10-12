@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <esp_system.h>
 //#include <ArduinoOTA.h>
 #include "display.h"
 #include "main.h"
@@ -9,7 +10,7 @@
 #include "ADC78H90.h"
 #include "RemoteControl.h"
 
-const char *apPassword = "12345678";
+String apPassword = "";
 
 String apSSID = "DSG_22.6GHz";
 String deviceSerial = "UNKNOWN";
@@ -600,7 +601,62 @@ String wifiPassword;
 // true  = Wi-Fi + Web Interface enabled
 // false = Wi-Fi completely disabled
 // --------------------------------------------------------------
-constexpr bool WIFI_ENABLED = false;
+constexpr bool WIFI_ENABLED = true;
+
+
+// --------------------------------------------------------------
+// Persistent Wi-Fi hotspot password
+// A password is generated only once and stored in NVS.
+// --------------------------------------------------------------
+String generateAPPassword()
+{
+  static const char charset[] =
+      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  const int passwordLength = 10;
+  const int charsetLength = sizeof(charset) - 1;
+
+  String password;
+  password.reserve(passwordLength);
+
+  for (int i = 0; i < passwordLength; i++)
+  {
+    uint32_t randomValue = esp_random();
+    password += charset[randomValue % charsetLength];
+  }
+
+  return password;
+}
+
+
+void loadOrCreateAPPassword()
+{
+  if (!WIFI_ENABLED)
+    return;
+
+  preferences.begin("WifiAP", false);
+
+  apPassword = preferences.getString("password", "");
+
+  // No valid password stored yet -> create it once.
+  if (apPassword.length() != 10)
+  {
+    apPassword = generateAPPassword();
+    preferences.putString("password", apPassword);
+
+    Serial.println("[WiFi] New hotspot password generated.");
+  }
+  else
+  {
+    Serial.println("[WiFi] Existing hotspot password loaded from NVS.");
+  }
+
+  // Temporary debug output for testing.
+  Serial.print("[WiFi] Hotspot password: ");
+  Serial.println(apPassword);
+
+  preferences.end();
+}
 
 
 
@@ -677,6 +733,35 @@ WiFiState wifiState = WIFI_INIT;
 unsigned long wifiStartTime = 0;
 int wifiRetryCount = 0;
 
+String hotspotIP = "";
+
+bool hotspotDisplayActive = false;
+bool hotspotDisplayShowsPassword = false;
+
+unsigned long hotspotDisplayLastChange = 0;
+
+void updateHotspotInfoDisplay()
+{
+  if (!WIFI_ENABLED || !hotspotDisplayActive)
+    return;
+
+  if (millis() - hotspotDisplayLastChange < 2000)
+    return;
+
+  hotspotDisplayLastChange = millis();
+
+  hotspotDisplayShowsPassword = !hotspotDisplayShowsPassword;
+
+  if (hotspotDisplayShowsPassword)
+  {
+    ShowWiFiInfo(apPassword.c_str());
+  }
+  else
+  {
+    ShowWiFiInfo(hotspotIP.c_str());
+  }
+}
+
 // --------------------------------------------------------------
 // Main hardware initialization
 // Initializes serial control, display, touch input, fan, ADC, IO expander, and PLL.
@@ -686,6 +771,9 @@ void setup() {
   // Load the calibration table from non-volatile storage (NVS) during startup
   InitCalibrationData();
   InitHighPowerCalibrationData();
+
+  loadOrCreateAPPassword();
+
   Serial.println("Starting...");
 
   RC_Begin();
@@ -788,7 +876,7 @@ void WiFiTask(void *parameter) {
     IPAddress gateway(192, 168, 4, 1);
     IPAddress subnet(255, 255, 255, 0);
     WiFi.softAPConfig(local_IP, gateway, subnet);
-    WiFi.softAP(apSSID.c_str(), apPassword);
+    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
     String dots = "";
     int retries = 0;
     while (WiFi.softAPIP().toString() != "192.168.4.1" && retries++ < 50) {
@@ -2114,6 +2202,7 @@ void manageWiFiConnection() {
       if (millis() - wifiStartTime > 2000) { 
         wifiStartTime = millis();
         if (WiFi.status() == WL_CONNECTED) {
+          hotspotDisplayActive = false;
           wifiState = WIFI_CONNECTED;
           ConnectionStatus("Connected :)", true);
           String ipStr = WiFi.localIP().toString();
@@ -2135,7 +2224,7 @@ void manageWiFiConnection() {
     {
       ConnectionStatus("Hotspot...", true);
       WiFi.mode(WIFI_OFF);
-      WiFi.softAP(apSSID.c_str(), apPassword);
+      WiFi.softAP(apSSID.c_str(), apPassword.c_str());
       
       int retries = 0;
       String dots = "";
@@ -2145,8 +2234,14 @@ void manageWiFiConnection() {
           delay(500);
       }
 
-      ConnectionStatus("Hotspot IP:", true);
-      ConnectionStatus(WiFi.softAPIP().toString().c_str(), true);
+      hotspotIP = WiFi.softAPIP().toString();
+
+      ConnectionStatus(hotspotIP.c_str(), true);
+
+      hotspotDisplayActive = true;
+      hotspotDisplayShowsPassword = false;
+      hotspotDisplayLastChange = millis();
+
       InitServer();
       SetWifiStatus(WIFI_STATUS_HOTSPOT);
 
@@ -2195,6 +2290,7 @@ void loop() {
   {
    server.handleClient();
    manageWiFiConnection();
+   updateHotspotInfoDisplay();
   }
 
   if (currentTime - lastUpdateTime2 >= 500)
