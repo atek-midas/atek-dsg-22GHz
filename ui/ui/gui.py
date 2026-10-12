@@ -153,7 +153,7 @@ class AboutWindow(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self,
-            text="DSG 22.6 GHz Control Center",
+            text="DSG 22.6 GHz Control Panel",
             font=font(18, True),
             text_color=COLOR_TEXT
         ).pack(pady=(5, 3))
@@ -794,7 +794,7 @@ class ScpiWorker:
 class DSGMainWindow(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=COLOR_BG)
-        self.title("DSG 22.6 GHz - Control Psnel")
+        self.title("DSG 22.6 GHz - Control Panel")
         self.geometry("1200x780")
         self.minsize(1100, 700)
 
