@@ -10,6 +10,18 @@ The current desktop UI version is **1.0.0** and is implemented with **CustomTkin
 - A DSG device
 - A **USB-C cable**
 
+### Ready-to-run Windows and Linux builds
+
+Each [GitHub Release](https://github.com/atek-midas/atek-dsg-22GHz/releases) includes
+a single-file build of this UI that needs no Python installation:
+
+- **Windows:** `DSG_UI-vX.Y.Z-win.exe`, download and run it.
+- **Linux:** `DSG_UI-vX.Y.Z-lin`, make it executable (`chmod +x DSG_UI-vX.Y.Z-lin`) and run it.
+  To access the DSG's USB serial port, add your user to the `dialout` group once
+  (`sudo usermod -aG dialout $USER`) and log out and back in.
+
+The steps below are only needed to run the UI from source.
+
 ### Installation
 
 1. Clone or download this repository.
@@ -168,9 +180,11 @@ Files that do not match the expected naming format are rejected by the UI and an
 
 The **Settings** tab includes a **FIRMWARE UPDATE** button that flashes a `.bin` file to the DSG directly from the UI, using `esptool` — no Arduino IDE is required during the flashing step.
 
-> **Dependency note:** `esptool` must be installed in the Python environment used to run the UI for the Firmware Update feature to work.
+> **Dependency note:** `esptool` must be installed in the Python environment used to run the UI for the Firmware Update feature to work. The released Windows and Linux builds already include it.
 
 **Preparing the `.bin` file:**
+
+The firmware files on the [Releases](https://github.com/atek-midas/atek-dsg-22GHz/releases) page (`DSG_FW-vX.Y.Z-EU.bin`, `DSG_FW-vX.Y.Z-NonEU.bin`) are already merged and can be flashed directly. The steps below are only needed for firmware you compile yourself.
 
 Arduino IDE's "Export Compiled Binary" produces three separate files (bootloader, partition table, application). These must be merged into a single flashable image before using the UI's Firmware Update feature.
 

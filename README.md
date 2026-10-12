@@ -1,18 +1,20 @@
 ![EditedForHackAday](https://github.com/user-attachments/assets/bad8766b-52ef-475a-b041-01a4b451d7ac)
 
-## EU and Non-EU Firmware Branches
+## EU and Non-EU Firmware
 
-This repository provides separate firmware branches for EU and non-EU
-configurations because of the device's Wi-Fi functionality.
+Two firmware variants are built from the same source code because of the
+device's Wi-Fi functionality. Both are published, together with the desktop UI
+for Windows and Linux and the Python API (`dsg_api.py`), on the
+[Releases](https://github.com/atek-midas/atek-dsg-22GHz/releases) page.
 
-- **EU firmware (`release/eu`)**  
+- **EU firmware (`DSG_FW-vX.Y.Z-EU.bin`)**  
   Wi-Fi is disabled. Enabling Wi-Fi causes the product to operate as radio
   equipment and introduces additional regulatory and conformity requirements
   under the EU Radio Equipment Directive (RED) 2014/53/EU. The EU firmware
   therefore keeps Wi-Fi disabled so that the released product configuration
   remains within the intended EU conformity scope.
 
-- **Non-EU firmware (`release/non-eu`)**  
+- **Non-EU firmware (`DSG_FW-vX.Y.Z-NonEU.bin`)**  
   Wi-Fi is enabled, providing the DSG's wireless access point and web-interface
   functionality for configurations where this feature is permitted and covered
   by the applicable market requirements.
@@ -20,6 +22,28 @@ configurations because of the device's Wi-Fi functionality.
 The RF signal-generation functionality of the DSG is otherwise shared between
 the two firmware variants. The primary difference is whether the ESP32-S3 Wi-Fi
 functionality is enabled.
+
+The variant is selected at compile time with the `DSG_WIFI_ENABLED` flag
+(default `0`, i.e. EU). Building from the Arduino IDE without changes produces
+the EU firmware.
+
+### Creating a release
+
+Releases are built automatically by GitHub Actions
+(`.github/workflows/release.yml`). To publish a new version, push a tag:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+The workflow compiles both firmware variants, merges each into a single image
+that is flashed at offset `0x0`, builds the desktop UI as a single executable
+for Windows (`DSG_UI-vX.Y.Z-win.exe`) and Linux (`DSG_UI-vX.Y.Z-lin`), and
+attaches them, together with `dsg_api.py` and `api_usage_example.py`, to a
+GitHub Release. The release version and git commit are written into the
+firmware (`*IDN?`, `:SYST:VERS?`, `:SYST:BUILD?`) and the UI. Running the workflow manually from
+the Actions tab builds the same files without publishing a release.
 
 ## Overview
 

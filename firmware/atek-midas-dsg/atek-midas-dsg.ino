@@ -616,8 +616,13 @@ String wifiPassword;
 // Wi-Fi feature switch
 // true  = Wi-Fi + Web Interface enabled
 // false = Wi-Fi completely disabled
+// Defaults to false (EU firmware). The Non-EU release build passes
+// -DDSG_WIFI_ENABLED=1 to the compiler to enable Wi-Fi.
 // --------------------------------------------------------------
-constexpr bool WIFI_ENABLED = false;
+#ifndef DSG_WIFI_ENABLED
+#define DSG_WIFI_ENABLED 0
+#endif
+constexpr bool WIFI_ENABLED = (DSG_WIFI_ENABLED != 0);
 
 
 // --------------------------------------------------------------

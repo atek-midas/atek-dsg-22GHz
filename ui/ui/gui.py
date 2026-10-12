@@ -40,7 +40,8 @@ MONO_FAMILY = "Consolas"
 
 UNITS = ["KHz", "MHz", "GHz"]
 FILTER_ITEMS = ["Filter: OFF (0.15-22.6 GHz)", "Filter: ON (2-18 GHz)"]
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.0"  # replaced with the git tag by the release workflow
+ESPTOOL_FLAG = "--run-esptool"  # packaged executable: run esptool instead of the GUI
 REPO_URL = "https://github.com/atek-midas/atek-dsg-22GHz"
 
 # -----------------------------------------------------------------------------
@@ -68,6 +69,19 @@ def find_local_file(filename):
             return path
 
     return None
+
+
+def set_window_icon(window):
+    """Use dsg.ico as the window/taskbar icon (Windows). Bundled into the packaged executable."""
+    if sys.platform != "win32":
+        return
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    icon = os.path.join(base, "dsg.ico")
+    if os.path.isfile(icon):
+        try:
+            window.iconbitmap(icon)
+        except tk.TclError:
+            pass
 
 
 def open_file_or_repo_page(filename):
@@ -114,6 +128,8 @@ class AboutWindow(ctk.CTkToplevel):
         super().__init__(master, fg_color=COLOR_PANEL)
 
         self.title("About")
+        # CTkToplevel sets its own default icon shortly after creation; override it afterwards.
+        self.after(250, lambda: set_window_icon(self))
         self.resizable(False, False)
         self.transient(master)
 
@@ -757,6 +773,7 @@ class DSGMainWindow(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=COLOR_BG)
         self.title("DSG 22.6 GHz - Control Panel")
+        set_window_icon(self)
         self.geometry("1200x780")
         self.minsize(1100, 700)
 
@@ -1759,16 +1776,22 @@ class DSGMainWindow(ctk.CTk):
         self.append_log(f"[FW] Port: {port}")
 
         args = [
-            "-m", "esptool",
             "--chip", "esp32s3",
             "--port", port,
             "--baud", "460800",
             "write_flash", "0x0", filepath
         ]
 
+        # In the packaged executable, sys.executable is the app itself: it re-runs
+        # itself in esptool mode (see ESPTOOL_FLAG) instead of "python -m esptool".
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, ESPTOOL_FLAG] + args
+        else:
+            cmd = [sys.executable, "-m", "esptool"] + args
+
         try:
             self.firmware_process = subprocess.Popen(
-                [sys.executable] + args,
+                cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             )
@@ -1854,6 +1877,15 @@ class DSGMainWindow(ctk.CTk):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == ESPTOOL_FLAG:
+        import esptool
+        try:
+            esptool.main(sys.argv[2:])
+        except Exception as e:
+            print(f"esptool error: {e}")
+            sys.exit(1)
+        sys.exit(0)
+
     ctk.set_appearance_mode("dark")
     app = DSGMainWindow()
     app.mainloop()
