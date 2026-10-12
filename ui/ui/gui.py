@@ -71,6 +71,19 @@ def find_local_file(filename):
     return None
 
 
+def set_window_icon(window):
+    """Use dsg.ico as the window/taskbar icon (Windows). Bundled into the packaged executable."""
+    if sys.platform != "win32":
+        return
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    icon = os.path.join(base, "dsg.ico")
+    if os.path.isfile(icon):
+        try:
+            window.iconbitmap(icon)
+        except tk.TclError:
+            pass
+
+
 def open_file_or_repo_page(filename):
     """Open the local file if available; otherwise open it from GitHub."""
     path = find_local_file(filename)
@@ -115,6 +128,8 @@ class AboutWindow(ctk.CTkToplevel):
         super().__init__(master, fg_color=COLOR_PANEL)
 
         self.title("About")
+        # CTkToplevel sets its own default icon shortly after creation; override it afterwards.
+        self.after(250, lambda: set_window_icon(self))
         self.resizable(False, False)
         self.transient(master)
 
@@ -758,6 +773,7 @@ class DSGMainWindow(ctk.CTk):
     def __init__(self):
         super().__init__(fg_color=COLOR_BG)
         self.title("DSG 22.6 GHz - Control Panel")
+        set_window_icon(self)
         self.geometry("1200x780")
         self.minsize(1100, 700)
 

@@ -142,14 +142,51 @@ jobs:
           sed -i -E "s/^APP_VERSION = \"[^\"]*\"/APP_VERSION = \"$v\"/" ui/ui/gui.py
           grep -n '^APP_VERSION' ui/ui/gui.py
 
+      # File properties shown in Windows Explorer (Properties > Details)
+      - name: Windows version info
+        if: matrix.platform == 'win'
+        working-directory: ui/ui
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          LABEL: ${{ needs.version.outputs.label }}
+        run: |
+          python - <<'EOF'
+          import os, re
+          version, label = os.environ["VERSION"], os.environ["LABEL"]
+          nums = [int(n) for n in re.findall(r"\d+", version)][:4] if version != "dev" else []
+          nums = tuple(nums + [0] * (4 - len(nums)))
+          text = f'''VSVersionInfo(
+            ffi=FixedFileInfo(filevers={nums}, prodvers={nums}),
+            kids=[
+              StringFileInfo([StringTable('040904B0', [
+                StringStruct('CompanyName', 'Atek Midas'),
+                StringStruct('FileDescription', 'DSG 22.6 GHz Control Panel'),
+                StringStruct('FileVersion', '{label}'),
+                StringStruct('InternalName', 'DSG_UI'),
+                StringStruct('LegalCopyright', '© 2026 Atek Midas'),
+                StringStruct('OriginalFilename', 'DSG_UI-{label}-win.exe'),
+                StringStruct('ProductName', 'DSG 22.6 GHz Control Panel'),
+                StringStruct('ProductVersion', '{label}'),
+                StringStruct('Comments', 'https://atekmidas.com/')])]),
+              VarFileInfo([VarStruct('Translation', [1033, 1200])])
+            ]
+          )'''
+          open("version_info.txt", "w", encoding="utf-8").write(text)
+          print(text)
+          EOF
+
       - name: Build single-file executable
         working-directory: ui/ui
-        run: >
-          pyinstaller gui.py --onefile --windowed --noconfirm
-          --name "$APP_NAME"
-          --collect-all customtkinter
-          --collect-all esptool
-          --distpath ../../dist
+        run: |
+          extra=""
+          [ -f version_info.txt ] && extra="--version-file version_info.txt"
+          pyinstaller gui.py --onefile --windowed --noconfirm \
+            --name "$APP_NAME" \
+            --icon dsg.ico \
+            --add-data "dsg.ico:." \
+            --collect-all customtkinter \
+            --collect-all esptool \
+            --distpath ../../dist $extra
 
       - name: Smoke test (bundled esptool)
         run: |
@@ -208,6 +245,9 @@ jobs:
 
             The firmware files are merged images (bootloader + partitions + app) and
             are flashed at offset `0x0`, which is what the UI's **FIRMWARE UPDATE** button does.
+
+            **Windows:** the executable is not code-signed yet, so Windows SmartScreen may show
+            "Windows protected your PC". Click **More info** and then **Run anyway**.
 
             **Linux:** make the file executable with `chmod +x DSG_UI-*-lin`. To access the
             DSG's USB serial port, add your user to the `dialout` group once
