@@ -2,8 +2,8 @@
 # and publishes them together with the Python API as one GitHub Release.
 #
 # - Pushing a tag like "v1.2.0" builds everything and publishes a GitHub Release.
-# - "Run workflow" (workflow_dispatch) builds everything without publishing a
-#   release; the files can be downloaded from the run's Artifacts section.
+# - Pull requests and "Run workflow" (workflow_dispatch) build everything without
+#   publishing a release; the files can be downloaded from the run's Artifacts section.
 #
 # Release a new version (from an up-to-date main):
 #   git tag v1.2.0
@@ -15,6 +15,7 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
 
 permissions:
