@@ -123,7 +123,7 @@ void SaveCalibrationToNVS() {
     preferences.putBytes("data", calibTable, calibCount * sizeof(CalibData));
     
     preferences.end();
-    Serial.println("[NVS] Kalibrasyon ve seri numarasi NVS'e kaydedildi.");
+    Serial.println("[NVS] Calibration and serial number saved to NVS.");
 }
 
 void ClearCalibrationRAM() {
