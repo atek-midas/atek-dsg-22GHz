@@ -94,7 +94,7 @@ jobs:
       - name: Merge bootloader, partitions and app into one .bin (flash at 0x0)
         run: |
           pip install esptool
-          out="dsg-firmware-${{ matrix.variant }}-${{ needs.version.outputs.label }}.bin"
+          out="DSG_FW-${{ needs.version.outputs.label }}-${{ matrix.variant }}.bin"
           python -m esptool --chip esp32s3 merge-bin -o "$out" \
             --flash-mode keep --flash-freq keep --flash-size keep \
             0x0 build/atek-midas-dsg.ino.bootloader.bin \
@@ -104,8 +104,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.variant }}
-          path: dsg-firmware-*.bin
+          name: DSG_FW-${{ needs.version.outputs.label }}-${{ matrix.variant }}
+          path: DSG_FW-*.bin
 
   ui:
     needs: version
@@ -160,16 +160,17 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ui-${{ matrix.platform }}
+          name: ${{ env.APP_NAME }}
           path: dist/DSG_UI-*
 
   api:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/upload-artifact@v4
         with:
-          name: python-api
+          name: DSG_API-${{ needs.version.outputs.label }}
           path: |
             ui/ui/dsg_api.py
             ui/ui/api_usage_example.py
@@ -199,8 +200,8 @@ jobs:
             |---|---|
             | `DSG_UI-${{ needs.version.outputs.label }}-win.exe` | Desktop control UI for **Windows** (no Python required) |
             | `DSG_UI-${{ needs.version.outputs.label }}-lin` | Desktop control UI for **Linux** (no Python required) |
-            | `dsg-firmware-EU-${{ needs.version.outputs.label }}.bin` | Firmware for the EU, Wi-Fi **disabled** |
-            | `dsg-firmware-NonEU-${{ needs.version.outputs.label }}.bin` | Firmware for non-EU markets, Wi-Fi **enabled** |
+            | `DSG_FW-${{ needs.version.outputs.label }}-EU.bin` | Firmware for the EU, Wi-Fi **disabled** |
+            | `DSG_FW-${{ needs.version.outputs.label }}-NonEU.bin` | Firmware for non-EU markets, Wi-Fi **enabled** |
             | `dsg_api.py` | Python API to control the DSG from your own scripts (requires `pyserial`) |
             | `api_usage_example.py` | Example script using `dsg_api.py` |
             | `SHA256SUMS.txt` | SHA-256 checksums of the files above |

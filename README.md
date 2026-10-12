@@ -7,14 +7,14 @@ device's Wi-Fi functionality. Both are published, together with the desktop UI
 for Windows and Linux and the Python API (`dsg_api.py`), on the
 [Releases](https://github.com/atek-midas/atek-dsg-22GHz/releases) page.
 
-- **EU firmware (`dsg-firmware-EU-vX.Y.Z.bin`)**  
+- **EU firmware (`DSG_FW-vX.Y.Z-EU.bin`)**  
   Wi-Fi is disabled. Enabling Wi-Fi causes the product to operate as radio
   equipment and introduces additional regulatory and conformity requirements
   under the EU Radio Equipment Directive (RED) 2014/53/EU. The EU firmware
   therefore keeps Wi-Fi disabled so that the released product configuration
   remains within the intended EU conformity scope.
 
-- **Non-EU firmware (`dsg-firmware-NonEU-vX.Y.Z.bin`)**  
+- **Non-EU firmware (`DSG_FW-vX.Y.Z-NonEU.bin`)**  
   Wi-Fi is enabled, providing the DSG's wireless access point and web-interface
   functionality for configurations where this feature is permitted and covered
   by the applicable market requirements.

@@ -184,7 +184,7 @@ The **Settings** tab includes a **FIRMWARE UPDATE** button that flashes a `.bin`
 
 **Preparing the `.bin` file:**
 
-The firmware files on the [Releases](https://github.com/atek-midas/atek-dsg-22GHz/releases) page (`dsg-firmware-EU-vX.Y.Z.bin`, `dsg-firmware-NonEU-vX.Y.Z.bin`) are already merged and can be flashed directly. The steps below are only needed for firmware you compile yourself.
+The firmware files on the [Releases](https://github.com/atek-midas/atek-dsg-22GHz/releases) page (`DSG_FW-vX.Y.Z-EU.bin`, `DSG_FW-vX.Y.Z-NonEU.bin`) are already merged and can be flashed directly. The steps below are only needed for firmware you compile yourself.
 
 Arduino IDE's "Export Compiled Binary" produces three separate files (bootloader, partition table, application). These must be merged into a single flashable image before using the UI's Firmware Update feature.
 
