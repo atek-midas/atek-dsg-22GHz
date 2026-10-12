@@ -36,6 +36,8 @@ def main():
     with DSG(port, message_handler=lambda msg: print(f"  Device message: {msg}")) as dsg:
         print(f"Device        : {dsg.identify()}")
         print(f"Serial number : {dsg.get_serial_number()}")
+        fw = dsg.get_firmware_info()
+        print(f"Firmware      : {fw['version']} (commit {fw['commit']}, built {fw['build_date']})")
 
         print("\nSetting CW output: 2.4 GHz, filter OFF, 0 dBm")
         dsg.set_display_menu("CW")

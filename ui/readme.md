@@ -278,7 +278,7 @@ with DSG("COM5") as dsg:               # use your DSG's serial port
 | Group | Methods |
 |---|---|
 | Connection | `DSG(port)`, `close()`, `is_open()`, `with DSG(port) as dsg:` |
-| Identification | `identify()` |
+| Identification | `identify()`, `get_firmware_version()`, `get_firmware_info()` (version, git commit, build date) |
 | Display | `set_display_menu("CW" / "SWP")`, `get_display_menu()` |
 | CW output | `set_frequency(value, unit)`, `get_frequency()`, `set_power_level(dbm)`, `get_power_level()`, `set_filter(on)`, `get_filter()`, `set_rf_output(on)`, `get_rf_output()` |
 | Sweep | `set_sweep_start / stop / step(value, unit)`, `set_sweep_dwell(ms)`, `set_sweep_count(n)`, `set_sweep_power(dbm)`, `set_sweep_type("LIN" / "LOG")`, `start_sweep()`, `abort_sweep()` |

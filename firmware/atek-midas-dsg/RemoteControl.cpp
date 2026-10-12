@@ -15,8 +15,10 @@
 // NOTE: The examples below document the CURRENT handler behavior in this firmware.
 // ----------------------------------------------------------------------------
 // IDENTIFICATION / RESET
-// *IDN?                     -> DSG-22.6GHz,r1.0   (device identification)
+// *IDN?                     -> DSG,DSG-22.6GHz,SN_010,1.3.0 (manufacturer,model,serial,firmware version)
 // *RST                      -> Not Implemented yet!    (placeholder; no reset is performed)
+// :SYST:VERS?               -> 1.3.0                   (firmware version; "dev" for local builds)
+// :SYST:BUILD?              -> 409169d Oct 12 2026 21:35:24 (git commit + build date/time)
 //
 // CW FREQUENCY / POWER / RF PATH
 // :FREQ 1.234GHz            -> 0                       (set output frequency; Hz/kHz/MHz/GHz suffixes accepted)
@@ -89,7 +91,7 @@
 // :CAL:SAVE                 -> 0                       (save calibration table and device serial number to NVS)
 //
 // GUI / STATE SYNCHRONIZATION
-// :SYNC?                    -> { ... }                 (return current CW/Sweep/display state as JSON)
+// :SYNC?                    -> { ... }                 (current CW/Sweep/display state + fw_version, fw_commit, fw_build as JSON)
 // :SYNC                     -> -109,Query only command (SYNC is query-only)
 // ============================================================================
 
@@ -193,8 +195,10 @@ static double g_last_freq_hz = 1000e6;
 
 
 
-static void h_idn (char*, int);    
+static void h_idn (char*, int);
 static void h_rst (char*, int);
+static void h_syst_vers(char*, int);
+static void h_syst_build(char*, int);
 static void h_freq(char*, int);
 static void h_pow_att(char*, int);
 static void h_outa_pwr(char*, int);
@@ -246,6 +250,8 @@ typedef void (*scpi_handler_t)(char *args, int is_query);
 static const scpi_cmd_t scpi_table[] = {
   { "*IDN",        h_idn       },
   { "*RST",        h_rst       },
+  { "SYST:VERS",   h_syst_vers },
+  { "SYST:BUILD",  h_syst_build },
   { "FREQ",        h_freq      },
   { "POW:ATT",     h_pow_att   },
   { "POW:OUTA",    h_outa_pwr  },
@@ -455,9 +461,32 @@ static int split_params(char *args, char *outv[], int maxv) {
 }
 
 // === Handlers ===
+extern const char* FW_VERSION;
+extern const char* FW_COMMIT;
+extern const char* FW_BUILD_TIMESTAMP;
+
+// SCPI format: manufacturer,model,serial number,firmware version
 static void h_idn (char *args, int q) {
   (void)args; (void)q;
-  rc_writeln("DSG,DSG-22.6GHz,0,r1.0");
+  String idn = "DSG,DSG-22.6GHz,";
+  idn += deviceSerial.length() ? deviceSerial : String("0");
+  idn += ",";
+  idn += FW_VERSION;
+  rc_writeln(idn.c_str());
+}
+
+static void h_syst_vers(char *args, int q) {
+  (void)args;
+  if (!q) { rc_writeln("-109,Query only command"); return; }
+  rc_writeln(FW_VERSION);
+}
+
+// Returns "<commit> <build date> <build time>", e.g. "409169d Oct 12 2026 21:35:24"
+static void h_syst_build(char *args, int q) {
+  (void)args;
+  if (!q) { rc_writeln("-109,Query only command"); return; }
+  String build = String(FW_COMMIT) + " " + FW_BUILD_TIMESTAMP;
+  rc_writeln(build.c_str());
 }
 
 static void h_rst (char *args, int q) {
@@ -1556,6 +1585,8 @@ static void h_sync(char *args, int q) {
     json += "\"sw_amp\":\"" + AmpValueSweepForSweepMenu + "\",";
     json += "\"sw_type\":\"" + StepTypeValueForSweepMenu + "\",";
     json += "\"sw_count\":\"" + CountValueForSweepMenu + "\",";
+    json += "\"fw_version\":\"" + String(FW_VERSION) + "\",";
+    json += "\"fw_commit\":\"" + String(FW_COMMIT) + "\",";
     json += "\"fw_build\":\"" + String(FW_BUILD_TIMESTAMP) + "\"";
     json += "}";
 

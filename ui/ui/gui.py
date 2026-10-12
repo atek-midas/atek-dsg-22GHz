@@ -1838,8 +1838,14 @@ class DSGMainWindow(ctk.CTk):
             self._cw_step_unit_last = self.combo_step_unit.get()
             self.update_freq_step()
 
+            fw_version = data.get("fw_version")
             fw_build = data.get("fw_build")
-            if fw_build:
+            if fw_version:
+                fw_text = f"Firmware: v{fw_version}" if fw_version != "dev" else "Firmware: dev"
+                fw_text += f" ({data.get('fw_commit', 'unknown')}, {fw_build})"
+                self.lbl_fw_version.configure(text=fw_text)
+            elif fw_build:
+                # Older firmware that only reports its build date
                 self.lbl_fw_version.configure(text=f"Firmware: {fw_build}")
 
             self.append_log("[SYS] State Synchronized with Device Screen.")

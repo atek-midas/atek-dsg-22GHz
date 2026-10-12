@@ -144,8 +144,30 @@ class DSG:
     # Identification
     # -------------------------------------------------------------------------
     def identify(self):
-        """Return the device identification string (*IDN?)."""
+        """Return the device identification string (*IDN?).
+
+        Format: "DSG,DSG-22.6GHz,<serial number>,<firmware version>"
+        """
         return self.query("*IDN?")
+
+    def get_firmware_version(self):
+        """Return the firmware version, e.g. "1.3.0" ("dev" for local builds)."""
+        return self.query(":SYST:VERS?")
+
+    def get_firmware_info(self):
+        """Return the firmware version, git commit and build date as a dict.
+
+        Example: {"version": "1.3.0", "commit": "409169d",
+                  "build_date": "Oct 12 2026 21:35:24"}
+        The build date is the compile time (UTC for release builds).
+        """
+        info = {"version": self.get_firmware_version(), "commit": None, "build_date": None}
+        build = self.query(":SYST:BUILD?")
+        if build:
+            commit, _, build_date = build.partition(" ")
+            info["commit"] = commit
+            info["build_date"] = build_date
+        return info
 
     # -------------------------------------------------------------------------
     # Display
@@ -341,7 +363,7 @@ class DSG:
 
         Keys include cw_freq, cw_unit, cw_amp, filt, sw_start, sw_start_u,
         sw_stop, sw_stop_u, sw_step, sw_step_u, sw_dwell, sw_count, sw_amp,
-        sw_type and fw_build.
+        sw_type, fw_version, fw_commit and fw_build.
         """
         if not self.is_open():
             return None

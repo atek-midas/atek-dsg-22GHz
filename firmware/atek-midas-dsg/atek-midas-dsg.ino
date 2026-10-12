@@ -52,6 +52,22 @@ float temp = 0.0;
 // Combined result matches: "Aug 13 2026 14:32:51"
 const char* FW_BUILD_TIMESTAMP = __DATE__ " " __TIME__;
 
+// Firmware version and git commit. The release workflow passes them to the
+// compiler (e.g. -DDSG_FW_VERSION=1.3.0 -DDSG_FW_COMMIT=409169d); builds made
+// from the Arduino IDE report "dev" / "unknown".
+#define DSG_STRINGIFY_(x) #x
+#define DSG_STRINGIFY(x) DSG_STRINGIFY_(x)
+#ifdef DSG_FW_VERSION
+const char* FW_VERSION = DSG_STRINGIFY(DSG_FW_VERSION);
+#else
+const char* FW_VERSION = "dev";
+#endif
+#ifdef DSG_FW_COMMIT
+const char* FW_COMMIT = DSG_STRINGIFY(DSG_FW_COMMIT);
+#else
+const char* FW_COMMIT = "unknown";
+#endif
+
 char* FloatToChar(float avg) {
     static char buffer[20];
     snprintf(buffer, sizeof(buffer), "%.2f", avg); 
